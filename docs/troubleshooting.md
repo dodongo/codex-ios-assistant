@@ -36,22 +36,22 @@ launchctl kickstart -k "gui/$(id -u)/io.github.codex-ios-assistant.sender"
 - Check that `Message Contains` is `hola` and that the automation runs `iOS Assistant`.
 - Run the Shortcut by hand to expose pending permission prompts.
 
-Start with `iphone home`. That command tests Messages and the automation without using the tunnel.
+Start with `iphone home`. That command tests Messages and the automation without using Tailscale Serve.
 
 ## Shortcuts reports a lost network connection
 
-Test the receiver first, then the tunnel:
+Test the receiver first, then Tailscale Serve:
 
 ```bash
 curl http://127.0.0.1:8787/health
-curl https://iphone.example.com/health
+curl https://mac-name.tailnet-name.ts.net/health
 launchctl print "gui/$(id -u)/io.github.codex-ios-assistant.receiver"
-launchctl print "gui/$(id -u)/io.github.codex-ios-assistant.tunnel"
+tailscale status
+tailscale serve status
 tail -n 100 ~/Library/Logs/codex-ios-assistant/receiver.log
-tail -n 100 ~/Library/Logs/codex-ios-assistant/tunnel.log
 ```
 
-Use your configured hostname in the second command. If local health works and public health fails, rerun `scripts/setup-cloudflare` and `scripts/install-services`. If both work, rebuild the Shortcut so it contains the current hostname and token.
+Use your configured hostname in the second command. If local health works and the Tailscale health request fails, connect Tailscale and rerun `scripts/setup-tailscale`. Confirm the iPhone is connected to the same tailnet. If both work, rebuild the Shortcut so it contains the current hostname and token.
 
 On the iPhone, run the Shortcut by hand and grant access to the hostname when iOS asks.
 

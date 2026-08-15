@@ -12,7 +12,8 @@ You need:
 - Messages signed into iMessage on the Mac.
 - An iPhone that receives messages sent to your chosen iMessage address.
 - iCloud sync enabled for Shortcuts.
-- A domain whose DNS is managed by Cloudflare.
+- Tailscale installed and signed into the same tailnet on the Mac and iPhone.
+- MagicDNS enabled for the tailnet. The setup command can enable HTTPS on first use.
 
 Install Xcode Command Line Tools if `swift --version` fails:
 
@@ -31,9 +32,9 @@ Install the ChatGPT desktop and mobile apps if you plan to use [Remote connectio
 ## 1. Install the project
 
 ```bash
-git clone https://github.com/samin100/codex-ios-assistant.git
+git clone https://github.com/dodongo/codex-ios-assistant.git
 cd codex-ios-assistant
-brew install cloudflared steipete/tap/imsg
+brew install steipete/tap/imsg
 ./scripts/install
 ```
 
@@ -64,28 +65,28 @@ Run the prompt again at any time with:
 The config contains:
 
 - `IPHONE_MSG_TARGET`, an iMessage email address or phone number that reaches the iPhone;
-- `IPHONE_PUBLIC_URL`, a dedicated HTTPS origin with no path;
+- `IPHONE_PUBLIC_URL`, the Mac's private Tailscale HTTPS origin with no path;
 - `IPHONE_RECEIVER_TOKEN`, which the script generates without a prompt and does not print.
 
-The script writes `~/.config/codex-ios-assistant/config.env` with mode `0600`. Rerun it to change the target or hostname. Add `--force-token` to replace the token, then rebuild the Shortcut so both sides use the new value.
+When Tailscale is connected, the script derives `IPHONE_PUBLIC_URL` from the Mac's MagicDNS name. It writes `~/.config/codex-ios-assistant/config.env` with mode `0600`. Rerun it to change the target or hostname. Add `--force-token` to replace the token, then rebuild the Shortcut so both sides use the new value.
 
 For an unattended setup:
 
 ```bash
 ./scripts/configure \
   --target 'your-imessage-address@example.com' \
-  --url 'https://iphone.example.com'
+  --url 'https://mac-name.tailnet-name.ts.net'
 ```
 
-## 3. Create the tunnel
+## 3. Configure Tailscale Serve
 
 ```bash
-./scripts/setup-cloudflare
+./scripts/setup-tailscale
 ```
 
-On the first run, `cloudflared` opens a browser for Cloudflare authorization. Choose the account that owns the DNS zone. The script creates a tunnel named `codex-ios-assistant`, adds the DNS route, and writes `~/.config/codex-ios-assistant/cloudflared.yml`.
+On the first run, Tailscale may open a browser to enable HTTPS certificates for the tailnet. The script verifies that `IPHONE_PUBLIC_URL` matches this Mac and persists a private HTTPS reverse proxy with `tailscale serve --bg`.
 
-The receiver remains on `127.0.0.1:8787`; Cloudflare sends requests for the configured hostname to that loopback address. A named tunnel keeps the same hostname across reboots. See [Cloudflare Tunnel](cloudflare.md) for the generated config and DNS behavior.
+The receiver remains on `127.0.0.1:8787`; Tailscale Serve sends requests from permitted tailnet devices to that loopback address. The Tailscale daemon keeps the Serve configuration across reboots. See [Tailscale Serve](tailscale.md) for the network and removal behavior.
 
 ## 4. Start the background jobs
 
@@ -99,7 +100,6 @@ The script installs these per-user LaunchAgents:
 | --- | --- |
 | `io.github.codex-ios-assistant.sender` | Sends `hola` commands through Messages outside the Codex sandbox |
 | `io.github.codex-ios-assistant.receiver` | Receives phone responses on `127.0.0.1:8787` |
-| `io.github.codex-ios-assistant.tunnel` | Runs the named Cloudflare Tunnel |
 
 The jobs start at login and restart after a crash. Logs are under `~/Library/Logs/codex-ios-assistant/`.
 
@@ -145,7 +145,7 @@ Keep the sender restriction during normal use. Some iOS versions do not classify
 
 ## 7. Grant iPhone permissions
 
-Run the Shortcut by hand once. iOS may ask for access to the receiver hostname, on-screen content, screenshots, alarms, or the clipboard as it reaches each branch. Choose Allow for features you plan to use.
+Connect Tailscale on the iPhone, then run the Shortcut by hand once. iOS may ask for access to the receiver hostname, on-screen content, screenshots, alarms, or the clipboard as it reaches each branch. Choose Allow for features you plan to use.
 
 The installed Shortcut contains the receiver token. Keep the Shortcut and `build/ios-assistant-actions.plist` private.
 
@@ -157,6 +157,7 @@ Check the Mac jobs:
 iphone doctor
 curl http://127.0.0.1:8787/health
 curl "$(sed -n 's/^IPHONE_PUBLIC_URL="\(.*\)"$/\1/p' ~/.config/codex-ios-assistant/config.env)/health"
+tailscale serve status
 ```
 
 Both health requests should print:
@@ -165,7 +166,7 @@ Both health requests should print:
 codex-ios-assistant receiver up
 ```
 
-Test iMessage delivery without involving the tunnel:
+Test iMessage delivery without involving Tailscale Serve:
 
 ```bash
 iphone home
@@ -232,4 +233,4 @@ Stop the background jobs with:
 ./scripts/uninstall-services
 ```
 
-The uninstall script moves its LaunchAgent plists to the Trash. It leaves your config, logs, screenshots, Cloudflare tunnel, and iPhone Shortcut in place.
+The uninstall script moves its LaunchAgent plists to the Trash. It leaves your config, logs, screenshots, Tailscale Serve configuration, and iPhone Shortcut in place. See [Tailscale Serve](tailscale.md#remove-serve) before removing Serve configuration shared with other local services.

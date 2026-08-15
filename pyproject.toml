@@ -21,8 +21,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/samin100/codex-ios-assistant"
-Repository = "https://github.com/samin100/codex-ios-assistant"
+Homepage = "https://github.com/dodongo/codex-ios-assistant"
+Repository = "https://github.com/dodongo/codex-ios-assistant"
 
 [project.scripts]
 iphone = "iphone_cli.cli:main"

@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import secrets
 import shlex
+import shutil
+import subprocess
 from urllib.parse import urlsplit
 
 
@@ -44,6 +47,26 @@ def quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def tailscale_origin() -> str:
+    tailscale = shutil.which("tailscale")
+    if not tailscale:
+        return ""
+    result = subprocess.run(
+        [tailscale, "status", "--json"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return ""
+    try:
+        status = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return ""
+    dns_name = str(status.get("Self", {}).get("DNSName", "")).rstrip(".")
+    return f"https://{dns_name}" if dns_name else ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Configure codex-ios-assistant")
     parser.add_argument("--target", help="your own iMessage email address or phone number")
@@ -55,10 +78,11 @@ def main() -> int:
     target = args.target or prompt(
         "iMessage address that reaches this iPhone", current.get("IPHONE_MSG_TARGET", "")
     )
-    public_url = args.url or prompt(
-        "Cloudflare HTTPS origin (for example https://iphone.example.com)",
-        current.get("IPHONE_PUBLIC_URL", ""),
-    )
+    public_url = args.url or tailscale_origin() or current.get("IPHONE_PUBLIC_URL", "")
+    if not public_url:
+        public_url = prompt(
+            "Tailscale HTTPS origin (for example https://mac-name.tailnet.ts.net)"
+        )
     public_url = public_url.rstrip("/")
     parsed_url = urlsplit(public_url)
     if parsed_url.scheme != "https" or not parsed_url.hostname or parsed_url.path not in {"", "/"}:

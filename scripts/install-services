@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Install and start the per-user sender, receiver, and tunnel LaunchAgents."""
+"""Install and start the per-user sender and receiver LaunchAgents."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
 import plistlib
-import shutil
 import subprocess
 
 
@@ -15,7 +14,6 @@ VENV = REPO / ".venv"
 PYTHON = VENV / "bin" / "python"
 CONFIG_DIR = Path.home() / ".config" / "codex-ios-assistant"
 CONFIG_FILE = CONFIG_DIR / "config.env"
-TUNNEL_CONFIG = CONFIG_DIR / "cloudflared.yml"
 LOG_DIR = Path.home() / "Library" / "Logs" / "codex-ios-assistant"
 AGENT_DIR = Path.home() / "Library" / "LaunchAgents"
 DOMAIN = f"gui/{os.getuid()}"
@@ -72,20 +70,7 @@ def main() -> int:
         ),
     )
 
-    if TUNNEL_CONFIG.is_file():
-        cloudflared = shutil.which("cloudflared")
-        if not cloudflared:
-            raise SystemExit("cloudflared is missing. Install it with: brew install cloudflared")
-        install(
-            "io.github.codex-ios-assistant.tunnel",
-            plist(
-                "io.github.codex-ios-assistant.tunnel",
-                [cloudflared, "tunnel", "--config", str(TUNNEL_CONFIG), "run"],
-                "tunnel",
-            ),
-        )
-    else:
-        print("Tunnel service skipped; run ./scripts/setup-cloudflare, then rerun this script.")
+    print("Tailscale Serve is managed by the Tailscale daemon; verify it with scripts/setup-tailscale.")
     return 0
 
 

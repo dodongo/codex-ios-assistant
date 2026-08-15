@@ -6,7 +6,7 @@ Codex iOS Assistant lets Codex on a Mac control an iPhone. The `iphone` CLI send
 > This project is meant to be installed with Codex! To install it, please paste this message into a new Codex thread on your Mac:
 >
 > ```text
-> Please set up the `Samin100/codex-ios-assistant` GitHub project. I want to get it working on my own Mac and iPhone. Notify me when my input is required. Otherwise, please set up this project entirely on your own.
+> Please set up the `dodongo/codex-ios-assistant` GitHub project. I want to get it working on my own Mac and iPhone with Tailscale Serve. Notify me when my input is required. Otherwise, please set up this project entirely on your own.
 > ```
 
 ## Supported commands
@@ -29,7 +29,7 @@ flowchart LR
     C -->|Unix socket| D["Messages sender LaunchAgent"]
     D -->|private hola command| E["iPhone automation + Shortcut"]
     E --> F["Native iOS action"]
-    E -->|authenticated HTTPS response| G["Cloudflare Tunnel"]
+    E -->|authenticated HTTPS response| G["Tailscale Serve"]
     G --> H["receiver on Mac loopback"]
     H --> C
 ```
@@ -42,7 +42,8 @@ See [Architecture and protocol](docs/architecture.md) for request formats and tr
 
 - A Mac running macOS 14 or newer, with Python 3.11+, Messages, and Xcode Command Line Tools.
 - An iPhone that receives messages sent to the configured iMessage address.
-- A domain managed in Cloudflare.
+- Tailscale signed into the same tailnet on the Mac and iPhone.
+- MagicDNS and HTTPS enabled for the tailnet.
 - iCloud sync for Shortcuts.
 
 The ChatGPT desktop and mobile apps are required only for the Remote workflow.
@@ -50,16 +51,16 @@ The ChatGPT desktop and mobile apps are required only for the Remote workflow.
 ## Install
 
 ```bash
-git clone https://github.com/samin100/codex-ios-assistant.git
+git clone https://github.com/dodongo/codex-ios-assistant.git
 cd codex-ios-assistant
-brew install cloudflared steipete/tap/imsg
+brew install steipete/tap/imsg
 ./scripts/install
-./scripts/setup-cloudflare
+./scripts/setup-tailscale
 ./scripts/install-services
 ./scripts/copy-shortcut
 ```
 
-Configuration has three values: the iMessage address that reaches your iPhone, a stable HTTPS hostname such as `https://iphone.example.com`, and a generated receiver token. The installer stores them in `~/.config/codex-ios-assistant/`, outside the repository.
+Configuration has three values: the iMessage address that reaches your iPhone, the Mac's private Tailscale HTTPS origin, and a generated receiver token. The installer derives the origin from `tailscale status` and stores the values in `~/.config/codex-ios-assistant/`, outside the repository.
 
 `scripts/copy-shortcut` puts 95 native Shortcuts actions on the Mac clipboard. Paste them once into a blank shortcut and name it `iOS Assistant`. After iCloud syncs it to your iPhone, create the automation that listens for commands:
 
@@ -88,7 +89,7 @@ iphone alarm list --timeout 30
 | --- | --- |
 | `src/iphone_cli/` | CLI, Messages bridge, receiver, and URL builders |
 | `shortcut/actions.template.plist` | Sanitized 95-action Shortcut template |
-| `scripts/` | Install, configuration, tunnel, LaunchAgent, and clipboard tools |
+| `scripts/` | Install, configuration, Tailscale Serve, LaunchAgent, and clipboard tools |
 | `skills/iphone-control/` | Codex skill installed under `~/.agents/skills` |
 | `contacts/` | Swift Contacts search helper |
 | `tests/` | Python tests and Shortcut validation |
@@ -99,7 +100,7 @@ iphone alarm list --timeout 30
 - [Commands](docs/commands.md)
 - [Architecture and protocol](docs/architecture.md)
 - [Shortcut maintenance](docs/shortcut.md)
-- [Cloudflare Tunnel](docs/cloudflare.md)
+- [Tailscale Serve](docs/tailscale.md)
 - [Security](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Development](docs/development.md)

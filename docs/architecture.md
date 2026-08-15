@@ -9,7 +9,7 @@ The Mac sends commands through iMessage. The iPhone returns data through HTTPS.
 3. A per-user LaunchAgent accepts commands on a Unix socket and automates Messages in the macOS GUI session.
 4. A Message automation on the iPhone runs the 95-action Shortcut for messages that match `hola`.
 5. The Shortcut runs an iOS action. Branches that produce data post to `/text`, `/photo`, `/clipboard`, or `/get-alarm`.
-6. A named Cloudflare Tunnel sends requests for the public hostname to the receiver on `127.0.0.1:8787`.
+6. Tailscale Serve terminates HTTPS on the Mac's private `*.ts.net` origin and proxies requests to the receiver on `127.0.0.1:8787`.
 7. The CLI polls the local receiver for text data or watches the private inbox for a screenshot until it gets a response or reaches the timeout.
 
 ## Command format

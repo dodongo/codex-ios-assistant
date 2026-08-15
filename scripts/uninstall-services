@@ -13,7 +13,6 @@ import time
 LABELS = (
     "io.github.codex-ios-assistant.sender",
     "io.github.codex-ios-assistant.receiver",
-    "io.github.codex-ios-assistant.tunnel",
 )
 DOMAIN = f"gui/{os.getuid()}"
 AGENT_DIR = Path.home() / "Library" / "LaunchAgents"

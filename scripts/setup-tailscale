@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Expose the loopback receiver privately with Tailscale Serve."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "src"))
+
+from iphone_cli.config import public_url, receiver_port  # noqa: E402
+
+
+def run(*arguments: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        arguments,
+        check=True,
+        text=True,
+        capture_output=capture,
+    )
+
+
+def contains_backend(value: object, backend: str) -> bool:
+    if isinstance(value, str):
+        return value.rstrip("/") == backend.rstrip("/")
+    if isinstance(value, dict):
+        return any(contains_backend(item, backend) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_backend(item, backend) for item in value)
+    return False
+
+
+def main() -> int:
+    tailscale = shutil.which("tailscale")
+    if not tailscale:
+        raise SystemExit("tailscale is missing. Install the Tailscale app and sign in.")
+
+    result = run(tailscale, "status", "--json", capture=True)
+    status = json.loads(result.stdout)
+    if status.get("BackendState") != "Running":
+        raise SystemExit("Tailscale is not connected on this Mac. Connect it and retry.")
+
+    dns_name = str(status.get("Self", {}).get("DNSName", "")).rstrip(".")
+    if not dns_name:
+        raise SystemExit("Tailscale did not report a MagicDNS name for this Mac.")
+
+    expected_url = f"https://{dns_name}"
+    configured_url = public_url()
+    if configured_url != expected_url:
+        raise SystemExit(
+            f"IPHONE_PUBLIC_URL is {configured_url!r}, but this Mac's Tailscale origin is "
+            f"{expected_url!r}. Run scripts/configure --url {expected_url!r} and retry."
+        )
+
+    backend = f"http://127.0.0.1:{receiver_port()}"
+    serve_result = run(tailscale, "serve", "status", "--json", capture=True)
+    serve_status = json.loads(serve_result.stdout or "{}")
+    if serve_status and not contains_backend(serve_status, backend):
+        raise SystemExit(
+            "Tailscale Serve already has an unrelated configuration. Refusing to replace it; "
+            "inspect 'tailscale serve status' and choose a dedicated path or service."
+        )
+
+    print("Tailscale may open a browser once to enable HTTPS for this tailnet.")
+    run(tailscale, "serve", "--bg", backend)
+    run(tailscale, "serve", "status")
+    print(f"Configured private Tailscale Serve origin {expected_url} -> {backend}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -54,6 +54,6 @@ An `ActionOutput` attachment refers to an earlier action through `OutputUUID`. C
 
 ## Commit policy
 
-Commit the sanitized template. Do not commit rendered plists, exported Shortcuts, screenshots, tokens, tunnel credentials, or personal phone data.
+Commit the sanitized template. Do not commit rendered plists, exported Shortcuts, screenshots, tokens, tailnet details, or personal phone data.
 
 `scripts/validate-shortcut.py` checks the action count, placeholder count, unsupported legacy actions, output references, and control-flow groups. Add a validation rule when a Shortcut change introduces another structural assumption.

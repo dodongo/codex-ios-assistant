@@ -78,7 +78,7 @@ def public_url() -> str:
     if not url.startswith("https://") or "/" in url[len("https://") :]:
         raise IPhoneError(
             "IPHONE_PUBLIC_URL must be an HTTPS origin such as "
-            "https://iphone.example.com (without a path)."
+            "https://mac-name.tailnet-name.ts.net (without a path)."
         )
     return url
 

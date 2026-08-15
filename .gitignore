@@ -11,4 +11,3 @@ inbox/
 *.log
 *.part
 config.env
-cloudflared.yml

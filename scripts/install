@@ -11,6 +11,11 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+if ! command -v tailscale >/dev/null 2>&1; then
+  print -u2 "tailscale is required. Install the Tailscale app and sign in on this Mac."
+  exit 1
+fi
+
 "$python_bin" - <<'PY'
 import sys
 if sys.version_info < (3, 11):
@@ -43,10 +48,7 @@ fi
 
 print "Installed iphone CLI: $local_bin/iphone"
 print "Installed Codex skill: $user_skills/iphone-control"
-if ! command -v cloudflared >/dev/null 2>&1; then
-  print "Next dependency: brew install cloudflared"
-fi
 if ! command -v imsg >/dev/null 2>&1; then
   print "Optional Messages history: brew install steipete/tap/imsg"
 fi
-print "Next: run ./scripts/setup-cloudflare, make shortcut, and make services."
+print "Next: connect Tailscale, run ./scripts/setup-tailscale, install services, and copy the Shortcut."
