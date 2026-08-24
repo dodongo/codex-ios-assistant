@@ -32,7 +32,7 @@ The Shortcut handles:
 - screen text, screenshots, and Home Screen;
 - enabled-alarm listing, alarm creation, and time-based alarm disabling.
 
-Screen text and screenshots use separate commands. `hola screentext <id>` collects visible text and posts JSON to `/text`. `hola screenshot <id>` captures an image and posts it to `/photo`.
+Screen text and screenshots share the `hola screenshot <id>` command, which posts an image to `/photo`. `iphone screen read` applies Apple Vision OCR locally on the Mac; `iphone screen capture` returns the image path.
 
 The alarm list branch filters for enabled alarms before it loops over results. The off branch filters enabled alarms by hour and minute, then disables all matches. Labels are not part of the comparison.
 

@@ -8,7 +8,7 @@ The Mac sends commands through iMessage. The iPhone returns data through HTTPS.
 2. The `iphone-control` skill tells Codex which CLI command to use and how to interpret its result.
 3. A per-user LaunchAgent accepts commands on a Unix socket and automates Messages in the macOS GUI session.
 4. A Message automation on the iPhone runs the 95-action Shortcut for messages that match `hola`.
-5. The Shortcut runs an iOS action. Branches that produce data post to `/text`, `/photo`, `/clipboard`, or `/get-alarm`.
+5. The Shortcut runs an iOS action. Branches that produce data post to `/photo`, `/clipboard`, or `/get-alarm`. The legacy `/text` endpoint remains available for older shortcuts.
 6. Tailscale Serve terminates HTTPS on the Mac's private `*.ts.net` origin and proxies requests to the receiver on `127.0.0.1:8787`.
 7. The CLI polls the local receiver for text data or watches the private inbox for a screenshot until it gets a response or reaches the timeout.
 
@@ -44,12 +44,11 @@ Data endpoints require the receiver token in `X-Auth`. The Shortcut puts the req
 
 | Command | Shortcut request | CLI wait |
 | --- | --- | --- |
-| `hola screentext <id>` | JSON to `POST /text` | Poll `GET /text/<id>` every 0.5 seconds for up to 30 seconds |
 | `hola screenshot <id>` | Image to `POST /photo` | Watch the private inbox for up to 45 seconds |
 | `hola getclipboard <id>` | Text or JSON to `POST /clipboard` | Poll `GET /clipboard/<id>` for up to 30 seconds |
 | `hola alarm get <id>` | Alarm data to `POST /get-alarm` | Poll `GET /get-alarm/<id>` for up to 30 seconds |
 
-The receiver keeps up to 200 screen, clipboard, and alarm responses in memory. It saves screenshots under `~/.local/share/codex-ios-assistant/inbox/`. Restarting the receiver clears the in-memory values.
+The receiver keeps up to 200 legacy screen-text, clipboard, and alarm responses in memory. It saves screenshots under `~/.local/share/codex-ios-assistant/inbox/`. `iphone screen read` runs Apple Vision OCR locally on a temporary returned screenshot and removes that image after recognition. Explicit `iphone screen capture` results remain on disk. Restarting the receiver clears the in-memory values.
 
 ## CLI status values
 

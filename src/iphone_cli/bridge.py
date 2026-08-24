@@ -18,6 +18,7 @@ from urllib.request import Request, urlopen
 
 from .config import DATA_DIR, message_target, receiver_token, receiver_url, sender_socket
 from .errors import IPhoneError
+from .ocr import recognize_text
 
 
 MAX_COMMAND_BYTES = 4096
@@ -197,11 +198,18 @@ def _timeout(environment_name: str, default: int) -> int:
 
 
 def read_screen() -> None:
-    request_id = _correlation_id()
-    _receiver_request("DELETE", f"/text/{request_id}")
-    send_command(f"hola screentext {request_id}")
-    text = _poll(f"/text/{request_id}", _timeout("READ_SCREEN_TIMEOUT", 30))
-    sys.stdout.write(text.decode("utf-8"))
+    timeout = _timeout("READ_SCREEN_TIMEOUT", 30)
+    started = time.monotonic()
+    image = request_screen_capture(timeout=timeout)
+    remaining = max(1, int(timeout - (time.monotonic() - started)))
+    try:
+        text = recognize_text(image, timeout=remaining)
+    finally:
+        try:
+            image.unlink()
+        except OSError:
+            pass
+    sys.stdout.write(f"<screen>\n{text}\n</screen>\n")
 
 
 def read_clipboard() -> None:
@@ -220,7 +228,7 @@ def read_alarms() -> None:
     sys.stdout.buffer.write(value)
 
 
-def capture_screen() -> None:
+def request_screen_capture(*, timeout: int | None = None) -> Path:
     request_id = _correlation_id()
     inbox = DATA_DIR / "inbox"
     inbox.mkdir(parents=True, exist_ok=True)
@@ -231,14 +239,17 @@ def capture_screen() -> None:
         if candidate.is_file():
             candidate.unlink()
     send_command(f"hola screenshot {request_id}")
-    deadline = time.monotonic() + _timeout("SCREENSHOT_TIMEOUT", 45)
+    deadline = time.monotonic() + (timeout or _timeout("SCREENSHOT_TIMEOUT", 45))
     while time.monotonic() < deadline:
         for candidate in candidates:
             if candidate.is_file():
-                print(candidate.resolve())
-                return
+                return candidate.resolve()
         time.sleep(0.5)
     raise IPhoneError("Timed out waiting for the iPhone screenshot.")
+
+
+def capture_screen() -> None:
+    print(request_screen_capture())
 
 
 def build_parser() -> argparse.ArgumentParser:
