@@ -1051,9 +1051,11 @@ def build_parser() -> argparse.ArgumentParser:
         _action_parser(ui, global_parent, action, help=description).set_defaults(handler=handle_ui)
     ui_open = _action_parser(ui, global_parent, "open", help="bring an installed app to the foreground")
     ui_open.add_argument("bundle", help="installed app bundle identifier")
+    ui_open.add_argument("--url", help="open a URL in this app without using the Shortcut bridge")
     ui_open.set_defaults(handler=handle_ui)
     tap = _action_parser(ui, global_parent, "tap", help="tap one uniquely named control from a fresh observation")
     tap.add_argument("name", help="exact observed accessibility name, not a guessed label")
+    tap.add_argument("--label", help="exact observed label to disambiguate a repeated accessibility name")
     tap.add_argument("--snapshot", required=True, help="observation UUID, valid for 30 seconds")
     tap.set_defaults(handler=handle_ui)
 

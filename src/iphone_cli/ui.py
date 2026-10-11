@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from urllib.parse import urlsplit
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -90,9 +91,14 @@ def _device(device: str, action: str, timeout: float) -> dict:
     return result
 
 
-def _unlocked(config: dict, timeout: float) -> None:
-    result = _device(config["device"], "lockState", timeout)
-    if result.get("passcodeRequired") is not False:
+def _unlocked(config: dict, timeout: float, address: str | None = None) -> None:
+    if address is None:
+        locked = _device(config["device"], "lockState", timeout).get("passcodeRequired")
+    else:
+        locked = _http(address, "/wda/locked", timeout=timeout)
+    if not isinstance(locked, bool):
+        raise IPhoneError("Cannot verify the iPhone's lock state; UI control stopped.")
+    if locked:
         raise IPhoneError("Unlock the iPhone before UI control; authentication is not bypassed.")
 
 
@@ -245,9 +251,9 @@ def supervise(nonce: str) -> None:
                 time.sleep(0.5)
             else:
                 raise IPhoneError("UI startup timed out: " + last_error)
-            _unlocked(config, 8)
+            _unlocked(config, 8, address)
             result = _http(address, "/session", {"capabilities": {"alwaysMatch": {
-                "bundleId": config["return_app"], "forceAppLaunch": False, "shouldTerminateApp": False,
+                "forceAppLaunch": False, "shouldTerminateApp": False,
             }}})
             if not isinstance(result, dict) or not isinstance(result.get("sessionId"), str):
                 raise IPhoneError("WebDriverAgent did not create a session.")
@@ -256,7 +262,13 @@ def supervise(nonce: str) -> None:
             while time.time() < state["deadline"] and not (ROOT / (nonce + ".stop")).exists():
                 if child.poll() is not None:
                     raise IPhoneError("Xcode ended the UI session unexpectedly.")
-                _unlocked(config, 15)
+                with (ROOT / "commands.lock").open("a") as command_lock:
+                    try:
+                        fcntl.flock(command_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        pass
+                    else:
+                        _unlocked(config, 5, address)
                 time.sleep(2)
     except (IPhoneError, OSError, ValueError, KeyError, TypeError) as failure:
         error = str(failure)
@@ -409,7 +421,7 @@ def handle_ui(args: argparse.Namespace) -> Result:
             (ROOT / (nonce + ".stop")).touch(mode=0o600)
             raise IPhoneError("UI startup timed out; cancellation requested. Inspect iphone ui status.")
         state = _active()
-        _unlocked(config, min(timeout, 8))
+        _unlocked(config, min(timeout, 8), state["address"])
         current = _device(config["device"], "details", min(timeout, 15))
         connection = current.get("connectionProperties")
         if not isinstance(connection, dict):
@@ -420,7 +432,19 @@ def handle_ui(args: argparse.Namespace) -> Result:
         prefix = "/session/" + state["session"]
         if action in {"open", "return"}:
             bundle = _bundle(args.bundle if action == "open" else config["return_app"])
-            _http(address, prefix + "/wda/apps/launch", {"bundleId": bundle}, timeout)
+            url = getattr(args, "url", None) if action == "open" else None
+            if url is not None:
+                try:
+                    scheme = urlsplit(url).scheme.lower()
+                except (TypeError, ValueError, AttributeError) as error:
+                    raise IPhoneError("Invalid app URL.") from error
+                if (not isinstance(url, str) or len(url) > 8192 or any(ord(c) < 32 for c in url)
+                        or not re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", url)
+                        or scheme in {"file", "data", "javascript"}):
+                    raise IPhoneError("Expected an app URL with a supported scheme.")
+                _http(address, prefix + "/url", {"url": url, "bundleId": bundle}, timeout)
+            else:
+                _http(address, prefix + "/wda/apps/activate", {"bundleId": bundle}, timeout)
             if _http(address, prefix + "/wda/apps/state", {"bundleId": bundle}, timeout) != 4:
                 raise IPhoneError("App launch was requested but foreground state was not verified.")
             return Result("ui", action, "completed", "App is in the foreground: " + bundle, {"bundle": bundle})
@@ -469,11 +493,17 @@ def handle_ui(args: argparse.Namespace) -> Result:
             if not isinstance(elements, list) or not all(isinstance(e, dict) for e in elements):
                 raise IPhoneError("Invalid snapshot controls.")
             matches = [e for e in elements if e.get("name") == args.name
+                       and (getattr(args, "label", None) is None or e.get("label") == args.label)
                        and e.get("enabled") == "true" and e.get("visible") == "true"
                        and e.get("type") in {"XCUIElementTypeButton", "XCUIElementTypeCell", "XCUIElementTypeSwitch", "XCUIElementTypeTextField"}]
             if len(matches) != 1:
                 raise IPhoneError("Tap target must be one observed, enabled, uniquely named control.")
-            found = _http(address, prefix + "/elements", {"using": "accessibility id", "value": args.name}, timeout)
+            predicate = "name == " + json.dumps(args.name) + " AND type == " + json.dumps(matches[0]["type"])
+            predicate += " AND visible == true AND enabled == true"
+            if getattr(args, "label", None) is not None:
+                predicate += " AND label == " + json.dumps(args.label)
+            query = {"using": "predicate string", "value": predicate}
+            found = _http(address, prefix + "/elements", query, timeout)
             if not isinstance(found, list) or len(found) != 1 or not isinstance(found[0], dict):
                 raise IPhoneError("Live tap target is missing or ambiguous; observe again.")
             element = found[0].get("element-6066-11e4-a52e-4f735466cecf")

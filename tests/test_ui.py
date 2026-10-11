@@ -78,6 +78,8 @@ class UITests(unittest.TestCase):
             return io.BytesIO(self.response)
         if request.full_url.endswith("/source"):
             value = self.source
+        elif request.full_url.endswith("/wda/locked"):
+            value = self.locked
         elif request.full_url.endswith("/elements"):
             value = self.element_results
         elif request.full_url.endswith("/wda/apps/state"):
@@ -123,11 +125,17 @@ class UITests(unittest.TestCase):
         with self.assertRaises(IPhoneError):
             self.call("tap", name="Select", snapshot=snapshot)
 
-    def test_handle_ui_rejects_locked_device_before_http(self):
+    def test_handle_ui_rejects_locked_device_before_action(self):
         self.locked = True
         with self.assertRaisesRegex(IPhoneError, "Unlock"):
             self.call("open", bundle="com.apple.shortcuts")
-        self.assertEqual(self.http_calls, [])
+        self.assertEqual(len(self.http_calls), 1)
+        self.assertTrue(self.http_calls[0][0].endswith("/wda/locked"))
+
+    def test_handle_ui_rejects_unknown_controller_lock_state(self):
+        self.response = json.dumps({"value": None}).encode()
+        with self.assertRaisesRegex(IPhoneError, "Cannot verify"):
+            self.call("observe")
 
     def test_handle_ui_rejects_changed_tunnel(self):
         self.address = "fd12:3456::2"
@@ -170,6 +178,16 @@ class UITests(unittest.TestCase):
         with self.assertRaisesRegex(IPhoneError, "element identifier"):
             self.call("tap", name="Select", snapshot=snapshot)
 
+    def test_handle_ui_tap_disambiguates_repeated_names_by_observed_label(self):
+        self.source = '<App><XCUIElementTypeButton name="enum" label="Value" visible="true" enabled="true"/>' \
+                      '<XCUIElementTypeButton name="enum" label="Condition" visible="true" enabled="true"/></App>'
+        snapshot = self.call("observe").data["snapshot"]
+        with self.assertRaises(IPhoneError):
+            self.call("tap", name="enum", snapshot=snapshot)
+        self.call("tap", name="enum", label="Value", snapshot=snapshot)
+        query = json.loads(self.http_calls[-2][1])
+        self.assertEqual(query, {"using": "predicate string", "value": 'name == "enum" AND type == "XCUIElementTypeButton" AND visible == true AND enabled == true AND label == "Value"'})
+
     def test_handle_ui_invalidates_snapshot_when_tap_outcome_is_unknown(self):
         snapshot = self.call("observe").data["snapshot"]
         normal = self.open
@@ -208,17 +226,34 @@ class UITests(unittest.TestCase):
         result = self.call("open", bundle="com.apple.shortcuts")
         self.assertEqual(result.status, "completed")
         self.assertEqual(json.loads(self.http_calls[-1][1])["bundleId"], "com.apple.shortcuts")
+        self.assertTrue(self.http_calls[-2][0].endswith("/wda/apps/activate"))
         self.call("return")
         self.assertEqual(json.loads(self.http_calls[-1][1])["bundleId"], "com.openai.chat")
-        self.response = json.dumps({"value": 2}).encode()
-        with self.assertRaisesRegex(IPhoneError, "foreground"):
-            self.call("open", bundle="com.apple.shortcuts")
+        normal = self.open
+        def background(request, **kwargs):
+            if request.full_url.endswith("/wda/apps/state"):
+                return io.BytesIO(json.dumps({"value": 2}).encode())
+            return normal(request, **kwargs)
+        with patch("urllib.request.build_opener", return_value=SimpleNamespace(open=background)):
+            with self.assertRaisesRegex(IPhoneError, "foreground"):
+                self.call("open", bundle="com.apple.shortcuts")
 
     def test_handle_ui_status_and_expired_session(self):
         self.write("state.json", {"status": "running", "deadline": time.time() - 1})
         self.assertEqual(self.call("status").data["session"]["status"], "expired")
         with self.assertRaisesRegex(IPhoneError, "expired"):
             self.call("observe")
+
+    def test_handle_ui_opens_app_url_without_shortcut_bridge(self):
+        url = "shortcuts://open-shortcut?name=Health%20Export"
+        self.call("open", bundle="com.apple.shortcuts", url=url)
+        self.assertTrue(self.http_calls[-2][0].endswith("/url"))
+        self.assertEqual(json.loads(self.http_calls[-2][1]), {"bundleId": "com.apple.shortcuts", "url": url})
+        for url in ["file:///private", "javascript:alert(1)", "data:text/plain,test", "not a URL", "foo://[", "foo:test\n"]:
+            before = len(self.http_calls)
+            with self.subTest(url=url), self.assertRaises(IPhoneError):
+                self.call("open", bundle="com.apple.shortcuts", url=url)
+            self.assertEqual(len(self.http_calls), before + 1)
 
     def test_handle_ui_start_rejects_duplicate_and_invalid_duration(self):
         with self.assertRaisesRegex(IPhoneError, "already exists"):
@@ -300,6 +335,7 @@ class UITests(unittest.TestCase):
                             for url, data in self.http_calls if url.endswith("/session"))
         self.assertFalse(capabilities["forceAppLaunch"])
         self.assertFalse(capabilities["shouldTerminateApp"])
+        self.assertNotIn("bundleId", capabilities)
 
     def test_handle_ui_native_timeouts_are_integer_seconds(self):
         ui.handle_ui(argparse.Namespace(action="observe", timeout=2.5, dry_run=False))
