@@ -18,7 +18,7 @@ For app navigation and taps, use the configured `iphone ui` controller. It works
 ```bash
 iphone ui start --duration 120 --timeout 60 --json
 iphone ui open com.apple.shortcuts --json
-iphone ui open com.apple.shortcuts --url 'shortcuts://open-shortcut?name=Health%20Export' --json
+iphone ui open com.apple.shortcuts --url 'shortcuts://open-shortcut?name=Example%20Shortcut' --json
 iphone ui observe --json
 iphone ui tap 'Select' --snapshot '<observation UUID>' --json
 iphone ui return --json

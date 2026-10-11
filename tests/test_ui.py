@@ -245,7 +245,7 @@ class UITests(unittest.TestCase):
             self.call("observe")
 
     def test_handle_ui_opens_app_url_without_shortcut_bridge(self):
-        url = "shortcuts://open-shortcut?name=Health%20Export"
+        url = "shortcuts://open-shortcut?name=Example%20Shortcut"
         self.call("open", bundle="com.apple.shortcuts", url=url)
         self.assertTrue(self.http_calls[-2][0].endswith("/url"))
         self.assertEqual(json.loads(self.http_calls[-2][1]), {"bundleId": "com.apple.shortcuts", "url": url})
