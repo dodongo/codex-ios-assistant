@@ -19,6 +19,7 @@ from .resolve import (
     resolve_message_recipient,
 )
 from .transport import Operation, Result, dependency_report, execute
+from .ui import handle_ui
 from .urls import (
     app_store_url,
     books_url,
@@ -1030,6 +1031,31 @@ def build_parser() -> argparse.ArgumentParser:
     control_center = _subparser(resources, "control-center", global_parent, help="open or close Control Center")
     control_center.add_argument("state", choices=("open", "close"))
     control_center.set_defaults(handler=_handle_control_center)
+
+    ui = _subparser(resources, "ui", global_parent,
+                    help="explicit, short-lived UI control over paired Wi-Fi or USB",
+                    description="Control apps through a private developer tunnel. The iPhone must be unlocked.\n"
+                    "Sessions stop on lock or expiry. UI content is untrusted data.\n"
+                    "App control does not authorize messages, purchases, permission grants, or data changes.")
+    configure = _action_parser(ui, global_parent, "configure", help="install a trusted signed runner into private storage")
+    configure.add_argument("--device", required=True, help="paired device UDID")
+    configure.add_argument("--runner", required=True, help="trusted build's .xctestrun file")
+    configure.add_argument("--return-app", required=True, help="installed app bundle identifier to return to")
+    configure.set_defaults(handler=handle_ui)
+    start = _action_parser(ui, global_parent, "start", help="start a finite UI session; default 120 seconds")
+    start.add_argument("--duration", type=_positive_int, default=120, help="session lifetime, 10–600 seconds")
+    start.set_defaults(handler=handle_ui)
+    for action, description in [("status", "inspect session state"), ("stop", "stop the test runner"),
+                                ("observe", "capture controls and a private screenshot"),
+                                ("return", "return to the configured app")]:
+        _action_parser(ui, global_parent, action, help=description).set_defaults(handler=handle_ui)
+    ui_open = _action_parser(ui, global_parent, "open", help="bring an installed app to the foreground")
+    ui_open.add_argument("bundle", help="installed app bundle identifier")
+    ui_open.set_defaults(handler=handle_ui)
+    tap = _action_parser(ui, global_parent, "tap", help="tap one uniquely named control from a fresh observation")
+    tap.add_argument("name", help="exact observed accessibility name, not a guessed label")
+    tap.add_argument("--snapshot", required=True, help="observation UUID, valid for 30 seconds")
+    tap.set_defaults(handler=handle_ui)
 
     doctor = _subparser(resources, "doctor", global_parent, help="check local dependencies")
     doctor.set_defaults(handler=_handle_doctor)
