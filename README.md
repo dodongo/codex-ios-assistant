@@ -33,6 +33,8 @@ iphone ui start --tailnet-address '<iPhone Tailscale IP>' --duration 600 --timeo
 
 After startup succeeds, the phone can switch to cellular while that session remains active. All device interactions use `iphone ui request METHOD PATH --data '<JSON object>'`. Paths are session-relative; use `--scope device` for device-level endpoints. Add `--observe` for a post-request screenshot, accessibility controls, and snapshot ID. UI-dependent changes require that fresh, single-use `--snapshot`; explicit app activation and deep-link navigation do not. Prefer verified deep links over searching menus. Sessions stop on lock, expiry, or connection failure. Starting again requires Wi-Fi; this does not support cold starts on cellular.
 
+Observed deep links with a `bundleId` wait for native UI idle for up to two seconds by default (`idleTimeoutMs` overrides this). Observations check the accessibility tree before and after the screenshot and retry capture, never the action, if the tree changes. Capture must settle within the observation timeout and session lifetime. Verify the returned screen and control values before claiming that a change succeeded.
+
 ```bash
 iphone ui request POST /url --data '{"url":"App-prefs:com.openai.chat","bundleId":"com.apple.Preferences"}' --observe --json
 iphone ui request POST /wda/keys --data '{"value":["ChatGPT"]}' --snapshot '<observation UUID>' --observe --json

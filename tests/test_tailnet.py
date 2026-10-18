@@ -125,7 +125,7 @@ class TailnetTests(unittest.TestCase):
 
     def test_tunnel_screenshot_avoids_native_device_commands(self):
         address = "unix:" + self.nonce
-        state = {"nonce": self.nonce, "address": address, "session": "SESSION"}
+        state = {"nonce": self.nonce, "address": address, "session": "SESSION", "deadline": time.time() + 120}
         image = b"\x89PNG\r\n\x1a\noriginal screenshot"
 
         def http(endpoint, path, *args, **kwargs):

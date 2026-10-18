@@ -128,8 +128,8 @@ class UITests(unittest.TestCase):
         self.assertEqual(result.status, "requested")
         self.assertNotEqual(result.data["snapshot"], snapshot)
         self.assertTrue(Path(result.data["screenshot"]).is_file())
-        self.assertEqual(self.http_calls[-2][0].rsplit("/", 1)[-1], "source")
-        self.assertTrue(self.http_calls[-1][0].endswith("/screenshot"))
+        self.assertTrue(self.http_calls[-2][0].endswith("/screenshot"))
+        self.assertTrue(self.http_calls[-1][0].endswith("/source"))
 
     def test_parser_exposes_one_device_command_interface(self):
         from contextlib import redirect_stderr
@@ -140,16 +140,59 @@ class UITests(unittest.TestCase):
             with self.subTest(action=action), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 build_parser().parse_args(["ui", action])
 
-    def test_observation_reuses_the_requested_xml_source(self):
+    def test_observation_reuses_then_rechecks_the_requested_xml_source(self):
         self.observe()
-        self.assertEqual(sum(url.endswith("/source") for url, _ in self.http_calls), 1)
-        self.assertTrue(self.http_calls[-1][0].endswith("/screenshot"))
+        self.assertEqual(sum(url.endswith("/source") for url, _ in self.http_calls), 2)
+        self.assertTrue(self.http_calls[-2][0].endswith("/screenshot"))
+        self.assertTrue(self.http_calls[-1][0].endswith("/source"))
 
     def test_observation_rejects_invalid_source_and_image_data(self):
         for source in ("<!DOCTYPE x><App/>", "<broken>"):
             self.source = source
             with self.subTest(source=source), self.assertRaisesRegex(IPhoneError, "observation failed"):
                 self.observe()
+
+    def test_observation_retries_capture_not_the_action_during_a_transition(self):
+        original = ui._http
+        screenshots = []
+        settled = '<App><XCUIElementTypeSwitch name="Allow Notifications" value="0" visible="true"/></App>'
+
+        def transitioning(address, path, *args, **kwargs):
+            if path == "/screenshot":
+                screenshots.append(path)
+                self.source = settled
+            return original(address, path, *args, **kwargs)
+
+        with patch.object(ui, "_http", side_effect=transitioning):
+            result = self.request("POST", "/url", data='{"url":"App-prefs:com.openai.chat","bundleId":"com.apple.Preferences"}', observe=True)
+        self.assertEqual(len(screenshots), 2)
+        self.assertEqual(sum(url.endswith("/url") for url, _ in self.http_calls), 1)
+        self.assertEqual(result.data["elements"][0]["value"], "0")
+        record = ui._read(self.root / "snapshots" / (result.data["snapshot"] + ".json"))
+        self.assertEqual(record["digest"], hashlib.sha256(settled.encode()).hexdigest())
+
+    def test_observation_stops_at_deadline_without_replaying_the_action(self):
+        original = ui._http
+        clock = [0]
+
+        def changing(address, path, *args, **kwargs):
+            if path == "/screenshot":
+                clock[0] += 0.6
+                self.source = f'<App name="{clock[0]}"/>'
+            return original(address, path, *args, **kwargs)
+
+        with patch.object(ui, "_http", side_effect=changing), patch.object(ui.time, "monotonic", side_effect=lambda: clock[0]):
+            with self.assertRaisesRegex(IPhoneError, "observation failed.*deadline"):
+                self.request("POST", "/url", data='{"url":"App-prefs:com.openai.chat"}', observe=True)
+        self.assertEqual(sum(url.endswith("/url") for url, _ in self.http_calls), 1)
+        self.assertFalse((self.root / "snapshots").exists())
+
+    def test_observed_deep_links_await_native_idle_and_preserve_explicit_waits(self):
+        for specified, expected in (({}, 2000), ({"idleTimeoutMs": 750}, 750)):
+            body = {"url": "App-prefs:com.openai.chat", "bundleId": "com.apple.Preferences", **specified}
+            self.request("POST", "/url", data=json.dumps(body), observe=True)
+            sent = [json.loads(data) for url, data in self.http_calls if url.endswith("/url")][-1]
+            self.assertEqual(sent["idleTimeoutMs"], expected)
 
     def test_wda_request_reads_are_session_scoped_without_a_full_observation(self):
         result = self.request(path="/source?format=json")
@@ -260,7 +303,7 @@ class UITests(unittest.TestCase):
         snapshot = self.observe().data["snapshot"]
         self.request("POST", "/session", scope="device", snapshot=snapshot, observe=True,
                      data='{"capabilities":{"alwaysMatch":{}}}')
-        self.assertTrue(self.http_calls[-2][0].endswith("/session/CREATED-SESSION/source"))
+        self.assertTrue(self.http_calls[-1][0].endswith("/session/CREATED-SESSION/source"))
 
     def test_session_ending_request_rejects_post_action_observation(self):
         with self.assertRaisesRegex(IPhoneError, "session-ending"):
