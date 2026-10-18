@@ -26,7 +26,8 @@ class TargetedTests(unittest.TestCase):
         self.change = True
         self.failure = False
         self.patches = [patch.object(ui, "_http", side_effect=self.http), patch.object(ui, "_active", return_value=self.state),
-                        patch.object(ui, "_unlocked"), patch.object(targeted.time, "sleep")]
+                        patch.object(ui, "_unlocked"), patch.object(targeted.time, "sleep"),
+                        patch.object(targeted.time, "monotonic", side_effect=lambda: self.clock)]
         for p in self.patches:
             p.start()
             self.addCleanup(p.stop)
@@ -69,6 +70,42 @@ class TargetedTests(unittest.TestCase):
         self.value = "1"
         self.assertFalse(self.execute()["changed"])
         self.assertFalse(any(path.endswith("/wda/tap") for path, _ in self.calls))
+
+    def test_waits_for_app_activation_before_looking_up_controls(self):
+        original = self.http
+        polls = [0]
+
+        def transitioning(address, path, *args, **kwargs):
+            result = original(address, path, *args, **kwargs)
+            if path == "/wda/activeAppInfo":
+                polls[0] += 1
+                if polls[0] < 3:
+                    return {"bundleId": "com.example.Chat"}
+            return result
+
+        with patch.object(ui, "_http", side_effect=transitioning):
+            self.assertTrue(self.execute()["verified"])
+        self.assertEqual([path for path, _ in self.calls[:3]], ["/wda/activeAppInfo"] * 3)
+
+    def test_navigation_waits_for_a_different_destination_control(self):
+        original = self.http
+        polls = [0]
+
+        def navigating(address, path, body=None, **kwargs):
+            result = original(address, path, body, **kwargs)
+            if path.endswith("/elements") and body["value"] == "Destination":
+                if self.value == "0":
+                    return []
+                polls[0] += 1
+                return [] if polls[0] == 1 else [{**result[0], "attribute/name": "Destination"}]
+            return result
+
+        ensure = json.dumps({"target": {"using": "accessibility id", "value": "Destination"},
+                             "attribute": "name", "equals": "Destination"})
+        with patch.object(ui, "_http", side_effect=navigating):
+            result = self.execute(self.request(ensure=ensure))
+        self.assertEqual(result["after"], "Destination")
+        self.assertEqual(sum(path.endswith("/wda/tap") for path, _ in self.calls), 1)
 
     def test_pointer_actions_use_the_same_live_target_and_verification(self):
         args = argparse.Namespace(target=json.dumps(TARGET), ensure='{"attribute":"value","equals":"1"}',

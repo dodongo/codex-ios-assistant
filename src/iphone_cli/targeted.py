@@ -31,11 +31,19 @@ class TargetedRequest:
                 raise ValueError("target requires a native element selector")
             if not isinstance(self.target.get("value"), str) or not 0 < len(self.target["value"]) <= 8192:
                 raise ValueError("target requires a selector value")
-            if (not isinstance(self.ensure, dict) or set(self.ensure) != {"attribute", "equals"}
+            if (not isinstance(self.ensure, dict) or not {"attribute", "equals"} <= set(self.ensure)
+                    or set(self.ensure) - {"attribute", "equals", "target"}
                     or self.ensure["attribute"] not in {"value", "name", "label", "enabled", "visible", "selected"}
                     or not isinstance(self.ensure["equals"], (str, bool, int, float, type(None)))
                     or isinstance(self.ensure["equals"], float) and not math.isfinite(self.ensure["equals"])):
                 raise ValueError("ensure requires an attribute and scalar equals value")
+            self.verification_target = self.ensure.get("target", self.target)
+            if self.verification_target is not self.target:
+                if (not isinstance(self.verification_target, dict) or set(self.verification_target) != {"using", "value"}
+                        or self.verification_target["using"] not in {"predicate string", "accessibility id", "class chain"}
+                        or not isinstance(self.verification_target["value"], str)
+                        or not 0 < len(self.verification_target["value"]) <= 8192):
+                    raise ValueError("ensure target requires a native selector in the same app")
             if args.method != "POST" or args.scope != "session" or path not in {
                 "/wda/tap", "/actions", "/element/{id}/click", "/element/{id}/value", "/element/{id}/clear",
             }:
@@ -61,16 +69,27 @@ class TargetedRequest:
             raise IPhoneError("Targeted request deadline exceeded; no action will be replayed.")
         return remaining
 
-    def _foreground(self):
-        foreground = ui._http(self.address, "/wda/activeAppInfo", timeout=self._remaining())
-        if not isinstance(foreground, dict) or foreground.get("bundleId") != self.target["bundleId"]:
-            raise IPhoneError("Target app is not in the foreground; navigate before targeting a control.")
+    def _foreground(self, wait=False):
+        while True:
+            foreground = ui._http(self.address, "/wda/activeAppInfo", timeout=self._remaining())
+            if not isinstance(foreground, dict) or not isinstance(foreground.get("bundleId"), str):
+                raise IPhoneError("Invalid foreground app response.")
+            if foreground["bundleId"] == self.target["bundleId"]:
+                return
+            if not wait:
+                raise IPhoneError("Target app is not in the foreground; action was not replayed.")
+            try:
+                time.sleep(min(0.05, self._remaining()))
+            except IPhoneError as error:
+                raise IPhoneError("Target app did not become foreground before the deadline.") from error
 
-    def _find(self):
+    def _find(self, selector, missing_ok=False):
         self._foreground()
         elements = ui._http(self.address, self.prefix + "/elements", {
-            "using": self.target["using"], "value": self.target["value"],
+            "using": selector["using"], "value": selector["value"],
         }, timeout=self._remaining())
+        if elements == [] and missing_ok:
+            return None
         if not isinstance(elements, list) or len(elements) != 1 or not isinstance(elements[0], dict):
             raise IPhoneError("Target must match exactly one live control; inspect the screen.")
         element = elements[0]
@@ -79,21 +98,32 @@ class TargetedRequest:
             raise IPhoneError("Invalid target element identity.")
         if element.get("enabled") is not True or element.get("displayed") is not True:
             raise IPhoneError("Target is not verified visible and enabled.")
+        return identifier, element
+
+    def _value(self, element):
         attribute = self.ensure["attribute"]
         key = {"value": "attribute/value", "name": "attribute/name", "visible": "displayed"}.get(attribute, attribute)
         if key not in element:
             raise IPhoneError("Controller omitted target attributes; restart with the configured element response capabilities.")
-        return identifier, element, element[key]
+        return element[key]
 
     def execute(self, address, prefix, timeout, state):
         """Run under the controller command lock, preserving the finite session deadline."""
         self.address, self.prefix = address, prefix
         self.until = time.monotonic() + min(timeout, max(0, state["deadline"] - time.time()))
-        identifier, element, before = self._find()
-        self._remaining()
+        self._foreground(wait=True)
         desired = self.ensure["equals"]
-        if type(before) is type(desired) and before == desired:
-            return {"changed": False, "verified": True, "before": before, "after": before}
+        while True:
+            existing = self._find(self.verification_target, missing_ok=True)
+            self._remaining()
+            before = self._value(existing[1]) if existing else None
+            if existing and type(before) is type(desired) and before == desired:
+                return {"changed": False, "verified": True, "before": before, "after": before}
+            found = existing if self.verification_target is self.target else self._find(self.target, missing_ok=True)
+            if found:
+                identifier, element = found
+                break
+            time.sleep(min(0.05, self._remaining()))
         path = prefix + self.path.replace("{id}", identifier)
         body = self.body
         if self.path in {"/wda/tap", "/actions"}:
@@ -123,9 +153,10 @@ class TargetedRequest:
             raise IPhoneError(f"Targeted action outcome is unknown; action was not replayed. {error}") from error
         try:
             while True:
-                _, _, after = self._find()
+                found = self._find(self.verification_target, missing_ok=True)
                 self._remaining()
-                if type(after) is type(desired) and after == desired:
+                after = self._value(found[1]) if found else None
+                if found and type(after) is type(desired) and after == desired:
                     return {"changed": True, "verified": True, "before": before, "after": after}
                 time.sleep(min(0.05, self._remaining()))
         except IPhoneError as error:

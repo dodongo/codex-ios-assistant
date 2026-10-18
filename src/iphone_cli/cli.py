@@ -6,7 +6,9 @@ import argparse
 import datetime as dt
 import json
 import re
+import signal
 import sys
+import time
 from typing import Callable
 
 from . import __version__
@@ -19,7 +21,7 @@ from .resolve import (
     resolve_message_recipient,
 )
 from .transport import Operation, Result, dependency_report, execute
-from .ui import handle_ui
+from .ui import _config as _ui_config, handle_ui
 from .urls import (
     app_store_url,
     books_url,
@@ -174,7 +176,106 @@ def _handle_url(args: argparse.Namespace) -> Operation:
 def _handle_ui_request(args: argparse.Namespace) -> Result:
     if args.data is not None:
         args.data = _read_value(args.data, label="WebDriverAgent JSON body")
-    return handle_ui(args)
+    sequence = getattr(args, "then", None)
+    finish = getattr(args, "finish", False)
+    if sequence is None and not finish:
+        return handle_ui(args)
+    requests = [argparse.Namespace(**vars(args))]
+    if sequence is not None:
+        try:
+            if len(sequence.encode()) > 131072:
+                raise ValueError("sequence is too large")
+            steps = json.loads(sequence)
+            if not isinstance(steps, list) or not 1 <= len(steps) <= 7:
+                raise ValueError("--then requires one to seven request objects")
+            for step in steps:
+                if (not isinstance(step, dict) or not {"method", "path"} <= step.keys()
+                        or step.keys() - {"method", "path", "scope", "data", "target", "ensure", "snapshot", "observe"}
+                        or not isinstance(step["method"], str) or not isinstance(step["path"], str)
+                        or "scope" in step and not isinstance(step["scope"], str)
+                        or "observe" in step and not isinstance(step["observe"], bool)):
+                    raise ValueError("each step requires method/path and supported request fields")
+                values = {**vars(args), "scope": "session", "data": None, "target": None, "ensure": None,
+                          "snapshot": None, "observe": False, "output": None, **step}
+                for key in ("data", "target", "ensure"):
+                    if key in step:
+                        values[key] = json.dumps(step[key], allow_nan=False)
+                requests.append(argparse.Namespace(**values))
+        except (ValueError, TypeError, RecursionError) as error:
+            raise IPhoneError(f"Invalid UI sequence: {error}") from error
+    previews = []
+    for request in requests:
+        preview = argparse.Namespace(**{**vars(request), "dry_run": True})
+        previews.append(handle_ui(preview).data)
+    if getattr(args, "dry_run", False):
+        return Result("ui", "request", "dry-run", "UI sequence validated; no device contacted.",
+                      {"requests": previews, "finish": finish})
+    started = time.monotonic()
+    deadline = started + args.timeout
+    timings = {"steps": []}
+    results = []
+    previous_termination_handler = None
+    if finish:
+        def terminate(signum, frame):
+            raise KeyboardInterrupt()
+
+        previous_termination_handler = signal.signal(signal.SIGTERM, terminate)
+    try:
+        for index, request in enumerate(requests, 1):
+            request.timeout = deadline - time.monotonic()
+            if request.timeout <= 0:
+                raise IPhoneError(f"UI sequence deadline exceeded before step {index}; remaining steps were not dispatched.")
+            step_started = time.monotonic()
+            try:
+                results.append(handle_ui(request))
+            except IPhoneError as error:
+                raise IPhoneError(f"UI sequence step {index} failed; remaining steps were not dispatched. {error}") from error
+            finally:
+                timings["steps"].append(round(time.monotonic() - step_started, 3))
+        return Result("ui", "request", results[-1].status,
+                      "UI sequence finished.", {"results": [_result_dictionary(r) for r in results], "finish": finish, "timings": timings})
+    finally:
+        original_error = sys.exc_info()[1]
+        if finish:
+            signal.signal(signal.SIGTERM, previous_termination_handler)
+        timings["execution_seconds"] = round(time.monotonic() - started, 3)
+        if finish:
+            cleanup_errors = []
+            return_started = time.monotonic()
+            cleanup = argparse.Namespace(**{**vars(args), "dry_run": False, "scope": "session", "method": "POST",
+                                           "snapshot": None, "target": None, "ensure": None, "observe": False,
+                                           "output": None, "timeout": 3})
+            try:
+                bundle = _ui_config()["return_app"]
+                cleanup.path = "/wda/apps/activate"
+                cleanup.data = json.dumps({"bundleId": bundle})
+                handle_ui(cleanup)
+                cleanup.path = "/wda/apps/state"
+                until = time.monotonic() + 3
+                while True:
+                    cleanup.timeout = until - time.monotonic()
+                    if cleanup.timeout <= 0:
+                        raise IPhoneError("Return app did not reach the foreground before the cleanup deadline.")
+                    if handle_ui(cleanup).data.get("value") == 4:
+                        break
+                    time.sleep(min(0.05, max(0, until - time.monotonic())))
+            except IPhoneError as error:
+                cleanup_errors.append(f"Return to app failed: {error}")
+            finally:
+                timings["return_seconds"] = round(time.monotonic() - return_started, 3)
+                cleanup.action, cleanup.timeout = "stop", 5
+                stop_started = time.monotonic()
+                try:
+                    handle_ui(cleanup)
+                except IPhoneError as error:
+                    cleanup_errors.append(f"Stop failed: {error}")
+                finally:
+                    timings["stop_seconds"] = round(time.monotonic() - stop_started, 3)
+                    timings["total_seconds"] = round(time.monotonic() - started, 3)
+            if cleanup_errors:
+                raise IPhoneError("; ".join(([str(original_error)] if original_error else []) + cleanup_errors))
+        else:
+            timings["total_seconds"] = round(time.monotonic() - started, 3)
 
 
 def _handle_camera(args: argparse.Namespace) -> Operation:
@@ -1055,7 +1156,9 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--scope", choices=("session", "device"), default="session", help="session-relative or device-level endpoint (default: session)")
     request.add_argument("--data", help="JSON object, or - to read JSON from stdin")
     request.add_argument("--target", help="live selector JSON: bundleId, using, value, and point x/y fractions for pointer requests")
-    request.add_argument("--ensure", help="desired control state JSON: attribute and equals; verify live state and dispatch at most once")
+    request.add_argument("--ensure", help="desired state JSON: attribute, equals, and optional destination target selector; dispatch at most once")
+    request.add_argument("--then", help="JSON array of further requests; one shared timeout, stop on the first failure")
+    request.add_argument("--finish", action="store_true", help="after execution starts, return to the configured app and stop on success, error, or interruption")
     request.add_argument("--snapshot", help="fresh observation UUID; required for UI changes")
     request.add_argument("--output", help="save the returned JSON value to a new private file")
     request.add_argument("--observe", action="store_true", help="include a fresh screenshot, accessibility controls, and single-use observation UUID after the request")
