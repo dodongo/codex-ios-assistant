@@ -291,13 +291,15 @@ def supervise(nonce: str) -> None:
             else:
                 raise IPhoneError("UI startup timed out: " + last_error)
             _unlocked(config, 8, address)
-            from .targeted import CAPABILITIES
+            from .targeted import CAPABILITIES, READINESS_SETTINGS
             result = _http(address, "/session", {"capabilities": {"alwaysMatch": {
                 **CAPABILITIES,
                 "forceAppLaunch": False, "shouldTerminateApp": False,
             }}})
             if not isinstance(result, dict) or not isinstance(result.get("sessionId"), str):
                 raise IPhoneError("WebDriverAgent did not create a session.")
+            _http(address, "/session/" + result["sessionId"] + "/appium/settings",
+                  {"settings": READINESS_SETTINGS})
             state.update(status="running", session=result["sessionId"])
             _write(ROOT / "state.json", state)
             while time.time() < state["deadline"] and not (ROOT / (nonce + ".stop")).exists():
@@ -650,6 +652,8 @@ def handle_ui(args: argparse.Namespace) -> Result:
                 state["session"] = session_id
                 _write(ROOT / "state.json", state)
                 prefix = "/session/" + session_id
+                from .targeted import READINESS_SETTINGS
+                _http(address, prefix + "/appium/settings", {"settings": READINESS_SETTINGS}, remaining_timeout())
             if ends_session:
                 (ROOT / (state["nonce"] + ".stop")).touch(mode=0o600)
                 state["deadline"] = time.time()

@@ -95,6 +95,8 @@ class UITests(unittest.TestCase):
             value = {"ready": True}
         elif request.full_url.endswith("/session"):
             value = {"sessionId": "CREATED-SESSION"}
+        elif request.full_url.endswith("/appium/settings"):
+            value = {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0}
         elif request.full_url.endswith("/wda/shutdown"):
             return io.BytesIO(b"Shutting down")
         else:
@@ -404,6 +406,10 @@ class UITests(unittest.TestCase):
         self.request("POST", "/session", scope="device", snapshot=snapshot,
                      data='{"capabilities":{"alwaysMatch":{}}}')
         self.assertEqual(ui._read(self.root / "state.json")["session"], "CREATED-SESSION")
+        self.assertTrue(self.http_calls[-1][0].endswith("/session/CREATED-SESSION/appium/settings"))
+        self.assertEqual(json.loads(self.http_calls[-1][1]), {
+            "settings": {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0},
+        })
 
     def test_session_creation_observes_the_new_session(self):
         snapshot = self.observe().data["snapshot"]
@@ -592,6 +598,10 @@ class UITests(unittest.TestCase):
         self.assertFalse(capabilities["forceAppLaunch"])
         self.assertFalse(capabilities["shouldTerminateApp"])
         self.assertNotIn("bundleId", capabilities)
+        self.assertEqual(capabilities["waitForIdleTimeout"], 0)
+        settings = [(url, json.loads(data)) for url, data in self.http_calls if url.endswith("/appium/settings")]
+        self.assertEqual(settings, [(f"http://[{self.address}]:8100/session/CREATED-SESSION/appium/settings",
+                                   {"settings": {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0}})])
 
     def test_handle_ui_native_timeouts_are_integer_seconds(self):
         ui.handle_ui(argparse.Namespace(action="request", method="GET", path="/source", scope="session", data=None, observe=True, timeout=2.5, dry_run=False))

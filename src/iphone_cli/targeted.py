@@ -12,7 +12,10 @@ from .errors import IPhoneError
 CAPABILITIES = {
     "shouldUseCompactResponses": False,
     "elementResponseAttributes": "type,rect,enabled,displayed,label,selected,attribute/name,attribute/value",
+    "waitForIdleTimeout": 0,
 }
+
+READINESS_SETTINGS = {"waitForIdleTimeout": 0, "animationCoolOffTimeout": 0}
 
 
 class TargetedRequest:
@@ -84,8 +87,8 @@ class TargetedRequest:
             except IPhoneError as error:
                 raise IPhoneError("Target app did not become foreground before the deadline.") from error
 
-    def _find(self, selector, missing_ok=False):
-        self._foreground()
+    def _find(self, selector, missing_ok=False, wait_foreground=False):
+        self._foreground(wait=wait_foreground)
         elements = ui._http(self.address, self.prefix + "/elements", {
             "using": selector["using"], "value": selector["value"],
         }, timeout=self._remaining())
@@ -112,10 +115,9 @@ class TargetedRequest:
         """Run under the controller command lock, preserving the finite session deadline."""
         self.address, self.prefix = address, prefix
         self.until = time.monotonic() + min(timeout, max(0, state["deadline"] - time.time()))
-        self._foreground(wait=True)
         desired = self.ensure["equals"] if self.ensure else None
         while True:
-            existing = self._find(self.verification_target, missing_ok=True)
+            existing = self._find(self.verification_target, missing_ok=True, wait_foreground=True)
             self._remaining()
             before = self._value(existing[1]) if existing and self.ensure else None
             if self.ensure and existing and type(before) is type(desired) and before == desired:

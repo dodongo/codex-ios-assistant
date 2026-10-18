@@ -65,6 +65,10 @@ class TargetedTests(unittest.TestCase):
         actions = [body for path, body in self.calls if path.endswith("/wda/tap")]
         self.assertEqual(actions, [{"x": 100, "y": 40}])
         self.assertFalse(any(path.endswith(("/source", "/screenshot")) for path, _ in self.calls))
+        self.assertEqual([path for path, _ in self.calls], [
+            "/wda/activeAppInfo", "/session/SESSION/elements", "/wda/activeAppInfo",
+            "/session/SESSION/wda/tap", "/wda/activeAppInfo", "/session/SESSION/elements",
+        ])
 
     def test_matching_state_is_a_verified_noop(self):
         self.value = "1"
