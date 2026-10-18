@@ -401,7 +401,7 @@ def handle_ui(args: argparse.Namespace) -> Result:
                 decoded in {"/element", "/elements", "/wda/apps/state", "/wda/getPasteboard"}
                 or re.fullmatch(r"/element/[A-Za-z0-9-]{1,128}/elements?", decoded)):
             query = True
-        navigation = method == "POST" and decoded in {"/url", "/wda/apps/activate"}
+        navigation = method == "POST" and decoded in {"/url", "/wda/apps/activate", "/wda/homescreen"}
         if navigation:
             if decoded == "/url":
                 url = body.get("url") if isinstance(body, dict) else None
@@ -417,7 +417,7 @@ def handle_ui(args: argparse.Namespace) -> Result:
                     _bundle(body["bundleId"])
                     if getattr(args, "observe", False):
                         body.setdefault("idleTimeoutMs", min(timeout, 2) * 1000)
-            else:
+            elif decoded == "/wda/apps/activate":
                 _bundle(body.get("bundleId"))
         targeted = None
         if getattr(args, "target", None) is not None:
@@ -670,8 +670,9 @@ def handle_ui(args: argparse.Namespace) -> Result:
                             if foreground["bundleId"] == body["bundleId"]:
                                 break
                             time.sleep(min(0.1, remaining_timeout()))
-                    if targeted:
-                        encoded = _http(address, "/screenshot", timeout=remaining_timeout())
+                    screenshot_only = targeted is not None or method == "GET" and decoded == "/screenshot"
+                    if screenshot_only:
+                        encoded = value if method == "GET" and decoded == "/screenshot" else _http(address, "/screenshot", timeout=remaining_timeout())
                     else:
                         source = value if method == "GET" and request_path == "/source" else _http(address, prefix + "/source", timeout=remaining_timeout())
                         while True:
@@ -707,7 +708,7 @@ def handle_ui(args: argparse.Namespace) -> Result:
                     with os.fdopen(descriptor, "wb") as stream:
                         stream.write(image)
                     data["screenshot"] = str(picture)
-                    if targeted:
+                    if screenshot_only:
                         data["observation_scope"] = "screenshot-only"
                     else:
                         _write(picture.with_suffix(".json"), {
@@ -728,7 +729,7 @@ def handle_ui(args: argparse.Namespace) -> Result:
                 except (OSError, ValueError) as error:
                     raise IPhoneError(f"Request was dispatched, but saving its response failed: {error}") from error
                 data["output"] = str(destination.resolve())
-            else:
+            elif not (getattr(args, "observe", False) and method == "GET" and decoded == "/screenshot"):
                 data["value"] = value
             verified = targeted is not None and value.get("verified") is True
             return Result("ui", action, "completed" if query or verified else "requested",

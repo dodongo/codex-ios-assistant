@@ -16,8 +16,7 @@ iphone --json --dry-run weather open --location Chicago --lat 41.8781 --lng -87.
 ## Screen, clipboard, and alarms
 
 ```bash
-iphone screen capture --timeout 45
-iphone screen capture --output ~/Desktop/iphone.png
+iphone ui request GET /screenshot --scope device --observe --finish --timeout 5
 iphone clipboard get
 iphone clipboard copy 'Text copied by Codex'
 iphone alarm list
@@ -30,7 +29,7 @@ iphone alarm off '7:30 AM'
 ## Device controls
 
 ```bash
-iphone home
+iphone ui request POST /wda/homescreen --scope device
 iphone flashlight on
 iphone flashlight off
 iphone timer start 10m
@@ -38,13 +37,16 @@ iphone timer pause
 iphone timer resume
 iphone timer cancel
 iphone low-power on
-iphone control-center open
 iphone call 'Jane Appleseed'
 ```
 
 A call starts at once. Confirm the recipient unless the user's current request names the person or number and asks you to call.
 
+Screenshots, Home, and Control Center use an active finite WebDriverAgent session. Screenshot observation saves a PNG without scanning accessibility or printing base64. Control Center uses a guarded `POST /actions --target` swipe with relative `point` and `end` coordinates inside a live visible window.
+
 ## Apps and links
+
+These helpers validate URLs and use the same WebDriverAgent `POST /url` request. Start a UI session first; they do not send Shortcut messages.
 
 ```bash
 iphone url open https://example.com

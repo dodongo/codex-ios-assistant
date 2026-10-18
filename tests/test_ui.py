@@ -120,6 +120,21 @@ class UITests(unittest.TestCase):
         self.assertTrue(self.http_calls[-1][0].endswith("/session/SESSION-ID/url"))
         self.assertEqual(len(self.http_calls), 2)
 
+    def test_homescreen_is_explicit_navigation_without_a_snapshot(self):
+        result = self.request("POST", "/wda/homescreen", scope="device")
+        self.assertEqual(result.status, "requested")
+        self.assertTrue(self.http_calls[-1][0].endswith("/wda/homescreen"))
+
+    def test_direct_screenshot_observation_saves_png_without_accessibility_or_base64_output(self):
+        result = self.request("GET", "/screenshot", scope="device", observe=True)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.data["observation_scope"], "screenshot-only")
+        self.assertNotIn("snapshot", result.data)
+        self.assertNotIn("value", result.data)
+        self.assertTrue(Path(result.data["screenshot"]).read_bytes().startswith(b"\x89PNG"))
+        self.assertEqual(sum(url.endswith("/screenshot") for url, _ in self.http_calls), 1)
+        self.assertFalse(any(url.endswith("/source") for url, _ in self.http_calls))
+
     def test_targeted_request_returns_verified_noop_without_screenshots(self):
         self.element_results = [{"element-6066-11e4-a52e-4f735466cecf": "ABC-123", "enabled": True,
                                  "displayed": True, "attribute/value": "1"}]

@@ -1,4 +1,4 @@
-"""Private transport adapter for the existing iMessage → Shortcuts bridge."""
+"""Dispatch validated operations through WebDriverAgent or native Shortcut intents."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import sys
 from urllib.error import URLError
 from urllib.request import urlopen
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Literal
 
 from .errors import IPhoneError
@@ -20,7 +19,7 @@ from .config import CONFIG_FILE, file_values, receiver_url, sender_socket
 
 OperationKind = Literal[
     "hola",
-    "screen-capture",
+    "wda",
     "clipboard-read",
     "alarm-read",
 ]
@@ -65,10 +64,8 @@ def command_for(operation: Operation) -> list[str]:
             "hola",
             *operation.arguments,
         ]
-    if operation.kind == "screen-capture":
-        return command_from_environment(
-            "IPHONE_SCREENSHOT_COMMAND", bridge_command("screenshot")
-        )
+    if operation.kind == "wda":
+        return [sys.executable, "-m", "iphone_cli", "ui", "request", *operation.arguments]
     if operation.kind == "clipboard-read":
         return command_from_environment(
             "IPHONE_CLIPBOARD_COMMAND", bridge_command("clipboard")
@@ -107,7 +104,6 @@ def execute(
     *,
     dry_run: bool = False,
     timeout: float = 30,
-    output: str | None = None,
 ) -> Result:
     command = command_for(operation)
     common = {
@@ -117,6 +113,17 @@ def execute(
     }
     if operation.url:
         common["url"] = operation.url
+
+    if operation.kind == "wda":
+        from .cli import build_parser
+        from .ui import handle_ui
+
+        request = build_parser().parse_args(["ui", "request", *operation.arguments, "--timeout", str(timeout)])
+        request.dry_run = dry_run
+        result = handle_ui(request)
+        return Result(operation.resource, operation.action, result.status,
+                      preview(operation) if dry_run else operation.summary,
+                      {**common, **result.data})
 
     if dry_run:
         return Result(
@@ -128,7 +135,6 @@ def execute(
         )
 
     environment = os.environ.copy()
-    environment["SCREENSHOT_TIMEOUT"] = str(max(1, int(timeout)))
     environment["CLIPBOARD_TIMEOUT"] = str(max(1, int(timeout)))
     environment["ALARM_TIMEOUT"] = str(max(1, int(timeout)))
     stdout = _run(command, timeout=timeout + 5, environment=environment)
@@ -182,24 +188,7 @@ def execute(
             data={**common, "alarms": alarms},
         )
 
-    source = Path(stdout.strip()).expanduser()
-    if not source.is_file():
-        raise IPhoneError(f"Screenshot helper returned a missing file: {source}")
-    final_path = source.resolve()
-    if output:
-        destination = Path(output).expanduser()
-        if destination.is_dir():
-            destination /= source.name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
-        final_path = destination.resolve()
-    return Result(
-        resource=operation.resource,
-        action=operation.action,
-        status="completed",
-        summary=str(final_path),
-        data={**common, "path": str(final_path)},
-    )
+    raise IPhoneError(f"Unsupported operation kind: {operation.kind}")
 
 
 def dependency_report() -> list[dict[str, object]]:

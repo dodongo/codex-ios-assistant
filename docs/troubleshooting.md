@@ -36,7 +36,7 @@ launchctl kickstart -k "gui/$(id -u)/io.github.codex-ios-assistant.sender"
 - Check that `Message Contains` is `hola` and that the automation runs `iOS Assistant`.
 - Run the Shortcut by hand to expose pending permission prompts.
 
-Start with `iphone home`. That command tests Messages and the automation without using Tailscale Serve.
+Test with `iphone flashlight on`, then `iphone flashlight off`. These commands test Messages and the automation without using Tailscale Serve.
 
 ## Shortcuts reports a lost network connection
 
@@ -57,7 +57,7 @@ On the iPhone, run the Shortcut by hand and grant access to the hostname when iO
 
 ## A response command times out
 
-The CLI polls every 0.5 seconds. Screenshot, alarm, and clipboard commands wait 30 seconds by default.
+The CLI polls every 0.5 seconds. Alarm and clipboard commands wait 30 seconds by default.
 
 Check the path in order:
 
@@ -70,7 +70,7 @@ Check the path in order:
 Increase the timeout for a slow phone without changing the default:
 
 ```bash
-iphone screen capture --timeout 60
+iphone alarm list --timeout 60
 ```
 
 ## `imsg` cannot find PhoneNumberKit
@@ -106,7 +106,7 @@ If `contacts` is missing, install Xcode Command Line Tools, accept the Xcode lic
 - Click the canvas before pressing Command-V.
 - Press Command-V once.
 - Rerun `scripts/copy-shortcut` if the pasteboard contains something else.
-- Check for `Copied and verified 95 Shortcuts actions` in the terminal.
+- Check for `Copied and verified 70 Shortcuts actions` in the terminal.
 - Run `make test` to validate the committed plist.
 
 Keep the previous Shortcut until the replacement passes a test.

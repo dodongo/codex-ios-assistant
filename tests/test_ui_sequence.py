@@ -78,6 +78,9 @@ class SequenceTests(unittest.TestCase):
                 raise IPhoneError("Return failed")
             self.foreground = body["bundleId"]
             return None
+        if path == "/wda/homescreen":
+            self.foreground = "com.apple.springboard"
+            return None
         if path.endswith("/wda/apps/state"):
             return 4 if self.foreground == body["bundleId"] else 1
         self.fail("Unexpected request, including any full-screen scan: " + path)
@@ -117,6 +120,32 @@ class SequenceTests(unittest.TestCase):
             cli._handle_ui_request(self.args())
         self.assertFalse(any(path.endswith("/actions") for path in self.calls))
         self.assertEqual(self.foreground, "com.example.Chat")
+        self.assertTrue(self.stopped)
+
+    def test_finish_dismisses_system_overlay_before_returning_and_stopping(self):
+        args = cli.build_parser().parse_args(["ui", "request", "GET", "/wda/activeAppInfo", "--scope", "device",
+                                             "--finish", "--timeout", "2"])
+        self.foreground = "com.apple.springboard"
+        cli._handle_ui_request(args)
+        self.assertIn("/wda/homescreen", self.calls)
+        self.assertEqual(self.foreground, "com.example.Chat")
+        self.assertTrue(self.stopped)
+
+    def test_return_app_running_under_an_overlay_does_not_count_as_returned(self):
+        original = self.http
+
+        def overlay_remains(address, path, *args, **kwargs):
+            result = original(address, path, *args, **kwargs)
+            if path == "/wda/activeAppInfo":
+                return {"bundleId": "com.apple.springboard"}
+            if path.endswith("/wda/apps/state"):
+                return 4
+            return result
+
+        args = cli.build_parser().parse_args(["ui", "request", "GET", "/wda/activeAppInfo", "--scope", "device",
+                                             "--finish", "--timeout", "2"])
+        with patch.object(ui, "_http", side_effect=overlay_remains), self.assertRaisesRegex(IPhoneError, "foreground"):
+            cli._handle_ui_request(args)
         self.assertTrue(self.stopped)
 
     def test_stop_still_runs_when_return_fails_and_both_errors_are_reported(self):

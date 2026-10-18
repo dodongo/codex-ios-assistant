@@ -27,20 +27,23 @@ def main() -> int:
     path = Path(sys.argv[1]) if len(sys.argv) == 2 else Path("shortcut/actions.template.plist")
     with path.open("rb") as source:
         actions = plistlib.load(source)
-    if not isinstance(actions, list) or len(actions) != 95:
-        raise SystemExit(f"expected 95 Shortcut actions, found {len(actions) if isinstance(actions, list) else 'non-list'}")
+    if not isinstance(actions, list) or len(actions) != 70:
+        raise SystemExit(f"expected 70 Shortcut actions, found {len(actions) if isinstance(actions, list) else 'non-list'}")
 
     strings = [value for value in walk(actions) if isinstance(value, str)]
     public_count = sum(value.count(PUBLIC_PLACEHOLDER) for value in strings)
     token_count = sum(value.count(TOKEN_PLACEHOLDER) for value in strings)
-    if public_count != 4 or token_count != 4:
-        raise SystemExit("expected four public URL and four receiver-token placeholders")
+    if public_count != 2 or token_count != 2:
+        raise SystemExit("expected two public URL and two receiver-token placeholders")
     folded = "\n".join(strings).casefold()
     for forbidden in FORBIDDEN:
         if forbidden.casefold() in folded:
             raise SystemExit(f"private-looking value remains in template: {forbidden}")
     if "hola say" in folded or "is.workflow.actions.speaktext" in folded:
         raise SystemExit("unsupported legacy speech branch remains in the Shortcut template")
+    for command in ("controlcenter", "openurl", "screentext", "screenshot", "homescreen"):
+        if "hola " + command in folded:
+            raise SystemExit(f"WebDriverAgent counterpart remains in the Shortcut: {command}")
     literal_web_origins = [
         value
         for value in strings

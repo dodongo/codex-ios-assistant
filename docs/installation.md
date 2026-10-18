@@ -111,7 +111,7 @@ The first `iphone` command may prompt you to let the sender's Python process con
 ./scripts/copy-shortcut
 ```
 
-This command reads the private hostname and token, renders `build/ios-assistant-actions.plist` with mode `0600`, and writes 95 Shortcuts action items to the Mac pasteboard.
+This command reads the private hostname and token, renders `build/ios-assistant-actions.plist` with mode `0600`, and writes 70 Shortcuts action items to the Mac pasteboard.
 
 In Shortcuts on the Mac:
 
@@ -119,7 +119,7 @@ In Shortcuts on the Mac:
 2. Name it `iOS Assistant`.
 3. Click the empty action canvas.
 4. Press Command-V once.
-5. Wait for all 95 actions to appear, then close the editor.
+5. Wait for all 70 actions to appear, then close the editor.
 
 Do not copy plist text into Shortcuts. The Swift helper has placed native `com.apple.shortcuts.action` items on the pasteboard.
 
@@ -169,20 +169,20 @@ codex-ios-assistant receiver up
 Test iMessage delivery without involving Tailscale Serve:
 
 ```bash
-iphone home
+iphone flashlight on
+iphone flashlight off
 ```
 
-Messages should show `hola homescreen`, and the iPhone should open its Home Screen.
+Messages should show `hola flashlight on` followed by `hola flashlight off`.
 
 Test the response paths:
 
 ```bash
-iphone screen capture --timeout 45
 iphone alarm list --timeout 30
 iphone clipboard get --timeout 30
 ```
 
-`screen capture` prints a path under `~/.local/share/codex-ios-assistant/inbox/`.
+For screenshots, start a finite UI session and use `iphone ui request GET /screenshot --scope device --observe --finish`. The result contains a private PNG path.
 
 ## Mac Contacts and Messages
 

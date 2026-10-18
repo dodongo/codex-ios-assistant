@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import socket
@@ -16,7 +15,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .config import DATA_DIR, message_target, receiver_token, receiver_url, sender_socket
+from .config import message_target, receiver_token, receiver_url, sender_socket
 from .errors import IPhoneError
 
 
@@ -212,37 +211,12 @@ def read_alarms() -> None:
     sys.stdout.buffer.write(value)
 
 
-def request_screen_capture(*, timeout: int | None = None) -> Path:
-    request_id = _correlation_id()
-    inbox = DATA_DIR / "inbox"
-    inbox.mkdir(parents=True, exist_ok=True)
-    os.chmod(DATA_DIR, 0o700)
-    os.chmod(inbox, 0o700)
-    candidates = [inbox / f"shot-{request_id}.{extension}" for extension in ("png", "jpg", "bin")]
-    for candidate in candidates:
-        if candidate.is_file():
-            candidate.unlink()
-    send_command(f"hola screenshot {request_id}")
-    deadline = time.monotonic() + (timeout or _timeout("SCREENSHOT_TIMEOUT", 45))
-    while time.monotonic() < deadline:
-        for candidate in candidates:
-            if candidate.is_file():
-                return candidate.resolve()
-        time.sleep(0.5)
-    raise IPhoneError("Timed out waiting for the iPhone screenshot.")
-
-
-def capture_screen() -> None:
-    print(request_screen_capture())
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="iphone-assistant-bridge")
     commands = parser.add_subparsers(dest="command", required=True)
     send = commands.add_parser("send", help="send one command through the sender agent")
     send.add_argument("words", nargs="+")
     commands.add_parser("sender", help="run the per-user sender agent")
-    commands.add_parser("screenshot", help="request a screenshot and return its path")
     commands.add_parser("clipboard", help="request and return the iPhone clipboard")
     commands.add_parser("alarms", help="request and return enabled alarms")
     return parser
@@ -255,8 +229,6 @@ def main(argv: list[str] | None = None) -> int:
             send_command(" ".join(args.words))
         elif args.command == "sender":
             run_sender()
-        elif args.command == "screenshot":
-            capture_screen()
         elif args.command == "clipboard":
             read_clipboard()
         elif args.command == "alarms":

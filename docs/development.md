@@ -34,7 +34,7 @@ Read [Shortcut maintenance](shortcut.md) before editing the plist. Output UUIDs 
 
 1. Run `make test` and build Contacts.
 2. Install the rendered Shortcut as a new copy.
-3. Test one-way commands and all four response endpoints.
+3. Test one-way Shortcut commands, clipboard/alarm response endpoints, and the WebDriverAgent replacements.
 4. Test unlabeled alarms and multiple enabled alarms at one time.
 5. Inspect the staged diff for private data.
 6. Update the version in `pyproject.toml` and `src/iphone_cli/__init__.py`.

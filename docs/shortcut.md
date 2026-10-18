@@ -1,6 +1,6 @@
 # Shortcut maintenance
 
-`shortcut/actions.template.plist` contains 95 native Shortcuts actions. The committed template replaces private values with:
+`shortcut/actions.template.plist` contains 70 native Shortcuts actions. The committed template replaces private values with:
 
 ```text
 __IOS_ASSISTANT_PUBLIC_URL__
@@ -27,12 +27,13 @@ This relies on an undocumented Shortcuts pasteboard format. Apple may change it 
 The Shortcut handles:
 
 - timer start, pause, resume, and cancel;
-- flashlight, Low Power Mode, and Control Center;
-- calls, clipboard reads and writes, and URL opening;
-- screen text, screenshots, and Home Screen;
+- flashlight and Low Power Mode;
+- calls and clipboard reads and writes;
 - enabled-alarm listing, alarm creation, and time-based alarm disabling.
 
-`iphone screen capture` sends `hola screenshot <id>`, which posts an image to `/photo`, and returns the saved image path. Open that image directly to inspect the phone screen.
+WebDriverAgent owns URL/app opening, Home, Control Center gestures, screenshots, and accessibility inspection. These actions do not send iMessages or use Shortcut response endpoints. App-opening CLI helpers route to the same `POST /url` API and require an active UI session.
+
+Keep the native Shortcut intents for timers, alarms, flashlight, Low Power Mode, and calls: WebDriverAgent would need app navigation and taps rather than an equivalent direct system API. Keep clipboard actions because device pasteboard reads can require foregrounding the runner and permission handling; the installed runner may accept a paste alert internally. No automatic permission approval is enabled by this CLI.
 
 The alarm list branch filters for enabled alarms before it loops over results. The off branch filters enabled alarms by hour and minute, then disables all matches. Labels are not part of the comparison.
 

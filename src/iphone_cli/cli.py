@@ -152,8 +152,8 @@ def _open_operation(resource: str, url: str, summary: str, **metadata: object) -
     return Operation(
         resource=resource,
         action="open",
-        kind="hola",
-        arguments=("openurl", url),
+        kind="wda",
+        arguments=("POST", "/url", "--data", json.dumps({"url": url})),
         summary=summary,
         url=url,
         metadata=dict(metadata),
@@ -242,21 +242,37 @@ def _handle_ui_request(args: argparse.Namespace) -> Result:
         if finish:
             cleanup_errors = []
             return_started = time.monotonic()
+            return_deadline = return_started + 3
             cleanup = argparse.Namespace(**{**vars(args), "dry_run": False, "scope": "session", "method": "POST",
                                            "snapshot": None, "target": None, "ensure": None, "observe": False,
                                            "output": None, "timeout": 3})
             try:
                 bundle = _ui_config()["return_app"]
+                cleanup.method, cleanup.scope, cleanup.path, cleanup.data = "GET", "device", "/wda/activeAppInfo", None
+                foreground = handle_ui(cleanup).data.get("value")
+                if not isinstance(foreground, dict) or not isinstance(foreground.get("bundleId"), str):
+                    raise IPhoneError("Cannot verify foreground app during cleanup.")
+                if foreground["bundleId"] == "com.apple.springboard":
+                    cleanup.method, cleanup.path = "POST", "/wda/homescreen"
+                    cleanup.timeout = return_deadline - time.monotonic()
+                    handle_ui(cleanup)
+                cleanup.method, cleanup.scope = "POST", "session"
                 cleanup.path = "/wda/apps/activate"
                 cleanup.data = json.dumps({"bundleId": bundle})
+                cleanup.timeout = return_deadline - time.monotonic()
                 handle_ui(cleanup)
                 cleanup.path = "/wda/apps/state"
-                until = time.monotonic() + 3
+                until = return_deadline
                 while True:
                     cleanup.timeout = until - time.monotonic()
                     if cleanup.timeout <= 0:
                         raise IPhoneError("Return app did not reach the foreground before the cleanup deadline.")
-                    if handle_ui(cleanup).data.get("value") == 4:
+                    app_state = handle_ui(cleanup).data.get("value")
+                    foreground_check = argparse.Namespace(**{**vars(cleanup), "method": "GET", "scope": "device",
+                                                              "path": "/wda/activeAppInfo", "data": None,
+                                                              "timeout": until - time.monotonic()})
+                    foreground = handle_ui(foreground_check).data.get("value")
+                    if app_state == 4 and isinstance(foreground, dict) and foreground.get("bundleId") == bundle:
                         break
                     time.sleep(min(0.05, max(0, until - time.monotonic())))
             except IPhoneError as error:
@@ -385,8 +401,8 @@ def _handle_messages_compose(args: argparse.Namespace) -> Operation:
     return Operation(
         resource="messages",
         action="compose",
-        kind="hola",
-        arguments=("openurl", url),
+        kind="wda",
+        arguments=("POST", "/url", "--data", json.dumps({"url": url})),
         summary=summary,
         url=url,
         metadata=metadata,
@@ -519,20 +535,6 @@ def _handle_app_store(args: argparse.Namespace) -> Operation:
     )
 
 
-def _handle_screen_capture(args: argparse.Namespace) -> Operation:
-    return Operation(resource="screen", action="capture", kind="screen-capture")
-
-
-def _handle_home(args: argparse.Namespace) -> Operation:
-    return Operation(
-        resource="home",
-        action="show",
-        kind="hola",
-        arguments=("homescreen",),
-        summary="Home Screen shown.",
-    )
-
-
 def _handle_flashlight(args: argparse.Namespace) -> Operation:
     action = "turned on" if args.state == "on" else "turned off"
     return Operation(
@@ -638,17 +640,6 @@ def _handle_low_power(args: argparse.Namespace) -> Operation:
     )
 
 
-def _handle_control_center(args: argparse.Namespace) -> Operation:
-    action = "opened" if args.state == "open" else "closed"
-    return Operation(
-        resource="control-center",
-        action=args.state,
-        kind="hola",
-        arguments=("controlcenter", args.state),
-        summary=f"Control Center {action}.",
-    )
-
-
 def _handle_doctor(args: argparse.Namespace) -> Result:
     checks = dependency_report()
     healthy = all(check["available"] for check in checks if check["required"])
@@ -680,7 +671,7 @@ def build_parser() -> argparse.ArgumentParser:
   iphone alarm set '7:30 AM' --label 'Wake up'
   iphone alarm list
   iphone alarm off '7:30 AM'
-  iphone screen capture
+  iphone ui request GET /screenshot --scope device --observe
   iphone --dry-run calendar open --date 2027-01-01
 """,
     )
@@ -1016,21 +1007,6 @@ def build_parser() -> argparse.ArgumentParser:
         action = _action_parser(resource, global_parent, "open", help=help_text)
         action.set_defaults(handler=_handle_fixed_url(name, url, summary))
 
-    screen = _subparser(
-        resources,
-        "screen",
-        global_parent,
-        help="capture the iPhone screen",
-        description="Capture the iPhone screen for direct image inspection.",
-        epilog="examples:\n  iphone screen capture\n  iphone screen capture --output ~/Desktop/iphone.png",
-    )
-    screen_capture = _action_parser(screen, global_parent, "capture", help="save a screenshot")
-    screen_capture.add_argument("-o", "--output", help="copy screenshot to this path")
-    screen_capture.set_defaults(handler=_handle_screen_capture)
-
-    home = _subparser(resources, "home", global_parent, help="show the iPhone Home Screen")
-    home.set_defaults(handler=_handle_home)
-
     flashlight = _subparser(resources, "flashlight", global_parent, help="control the flashlight")
     flashlight.add_argument("state", choices=("on", "off"))
     flashlight.set_defaults(handler=_handle_flashlight)
@@ -1129,10 +1105,6 @@ def build_parser() -> argparse.ArgumentParser:
     low_power.add_argument("state", choices=("on", "off"))
     low_power.set_defaults(handler=_handle_low_power)
 
-    control_center = _subparser(resources, "control-center", global_parent, help="open or close Control Center")
-    control_center.add_argument("state", choices=("open", "close"))
-    control_center.set_defaults(handler=_handle_control_center)
-
     ui = _subparser(resources, "ui", global_parent,
                     help="explicit, short-lived UI control over paired Wi-Fi or USB",
                     description="Control apps through a private developer tunnel. The iPhone must be unlocked.\n"
@@ -1155,7 +1127,7 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("path", help="endpoint path relative to the selected scope, including optional query parameters")
     request.add_argument("--scope", choices=("session", "device"), default="session", help="session-relative or device-level endpoint (default: session)")
     request.add_argument("--data", help="JSON object, or - to read JSON from stdin")
-    request.add_argument("--target", help="live selector JSON: bundleId, using, value, and point x/y fractions for pointer requests")
+    request.add_argument("--target", help="live selector JSON: bundleId, using, value, point x/y fractions, and optional end x/y fractions for pointer swipes")
     request.add_argument("--ensure", help="optional target verification JSON: attribute, equals, and optional destination target selector; dispatch at most once")
     request.add_argument("--then", help="JSON array of further requests; one shared timeout, stop on the first failure")
     request.add_argument("--finish", action="store_true", help="after execution starts, return to the configured app and stop on success, error, or interruption")
@@ -1224,7 +1196,6 @@ def main(argv: list[str] | None = None) -> int:
                 outcome,
                 dry_run=getattr(args, "dry_run", False),
                 timeout=getattr(args, "timeout", 30),
-                output=getattr(args, "output", None),
             )
         _emit(result, args)
         return 1 if result.status == "failed" else 0

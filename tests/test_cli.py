@@ -26,49 +26,24 @@ def run_cli(*arguments: str, env: dict[str, str] | None = None) -> subprocess.Co
 
 
 class CLITests(unittest.TestCase):
-    def test_screen_capture_preserves_image_and_timeout_budget(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            image = root / "screen.png"
-            image.write_bytes(b"original screenshot")
-            output = root / "copy.png"
-            helper = root / "screen-capture"
-            helper.write_text(
-                '#!/bin/sh\n'
-                f'printf "%s" "$SCREENSHOT_TIMEOUT" > "{root / "timeout"}"\n'
-                f'printf "%s" "{image}"\n'
-            )
-            helper.chmod(0o755)
-            for arguments, expected in (
-                (("screen", "capture"), "30"),
-                (("--timeout", "12", "screen", "capture"), "12"),
-                (("screen", "--timeout", "14", "capture"), "14"),
-                (("screen", "capture", "--timeout", "16"), "16"),
-            ):
-                with self.subTest(arguments=arguments):
-                    result = run_cli(
-                        *arguments, "--json", "--output", str(output),
-                        env={"IPHONE_SCREENSHOT_COMMAND": str(helper)},
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    value = json.loads(result.stdout)
-                    self.assertEqual(value["status"], "completed")
-                    self.assertEqual(value["path"], str(output.resolve()))
-                    self.assertEqual(output.read_bytes(), image.read_bytes())
-                    self.assertEqual((root / "timeout").read_text(), expected)
+    def test_replaced_shortcut_commands_are_not_exposed(self):
+        for resource in ("screen", "home", "control-center"):
+            with self.subTest(resource=resource):
+                result = run_cli(resource, "--dry-run")
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("invalid choice", result.stderr)
 
-    def test_screen_read_is_not_exposed(self):
-        result = run_cli("screen", "read")
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("invalid choice", result.stderr)
+    def test_app_helpers_use_the_uniform_wda_url_request_without_messages(self):
+        result = run_cli("url", "open", "example.com", "--dry-run", "--json",
+                         env={"IPHONE_IMSG_COMMAND": "/missing/sender"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value["kind"], "wda")
+        self.assertEqual(value["method"], "POST")
+        self.assertEqual(value["path"], "/url")
+        self.assertEqual(value["body"], {"url": "https://example.com"})
+        self.assertNotIn("hola", value["command"])
 
-    def test_screen_capture_rejects_missing_image(self):
-        result = run_cli(
-            "screen", "capture",
-            env={"IPHONE_SCREENSHOT_COMMAND": "/bin/echo /missing/screenshot.png"},
-        )
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("Screenshot helper returned a missing file", result.stderr)
 
     def test_alarm_off_normalizes_time(self):
         result = run_cli(
@@ -401,8 +376,6 @@ class CLITests(unittest.TestCase):
 
     def test_success_messages_use_concise_past_tense(self):
         cases = (
-            (("url", "open", "google.com"), "URL opened.\n"),
-            (("control-center", "close"), "Control Center closed.\n"),
             (("flashlight", "on"), "Flashlight turned on.\n"),
             (("timer", "pause"), "Timer paused.\n"),
             (("low-power", "off"), "Low Power Mode turned off.\n"),
@@ -443,7 +416,6 @@ class CLITests(unittest.TestCase):
             "photos": ("open",),
             "wallet": ("open",),
             "notes": ("open",),
-            "screen": ("capture",),
             "timer": ("start", "pause", "resume", "cancel"),
             "clipboard": ("copy", "get"),
         }
@@ -493,11 +465,6 @@ class CLITests(unittest.TestCase):
         self.assertIn("newest messages shown first", result.stdout)
         self.assertNotIn("chronological order", result.stdout)
 
-    def test_screen_help_uses_capture(self):
-        result = run_cli("screen", "--help")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("iphone screen capture", result.stdout)
-        self.assertNotIn("iphone screen read", result.stdout)
 
     def test_messages_chats_preserves_human_imsg_output(self):
         result = run_cli(

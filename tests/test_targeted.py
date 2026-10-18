@@ -131,6 +131,25 @@ class TargetedTests(unittest.TestCase):
         self.assertEqual(body["actions"][0]["actions"][0]["x"], 100)
         self.assertEqual(body["actions"][0]["actions"][-1]["type"], "pointerUp")
 
+    def test_pointer_swipe_resolves_both_points_inside_the_live_target(self):
+        args = argparse.Namespace(target=json.dumps({**TARGET, "end": {"x": 0.2, "y": 0.8}}),
+                                  ensure=None, method="POST", scope="session", snapshot=None, observe=False)
+        self.assertFalse(self.execute(targeted.TargetedRequest(args, "/actions", {}))["verified"])
+        body = next(body for path, body in self.calls if path.endswith("/actions"))
+        moves = [a for a in body["actions"][0]["actions"] if a["type"] == "pointerMove"]
+        self.assertEqual(moves, [
+            {"type": "pointerMove", "duration": 0, "origin": "viewport", "x": 100, "y": 40},
+            {"type": "pointerMove", "duration": 300, "origin": "viewport", "x": 30, "y": 52},
+        ])
+
+    def test_invalid_swipe_endpoints_fail_before_contacting_device(self):
+        for end in (None, {}, {"x": 2, "y": 0}, {"x": True, "y": 0}, {"x": float("nan"), "y": 0}):
+            with self.subTest(end=end), self.assertRaises(IPhoneError):
+                args = argparse.Namespace(target=json.dumps({**TARGET, "end": end}), ensure=None,
+                                          method="POST", scope="session", snapshot=None, observe=False)
+                targeted.TargetedRequest(args, "/actions", {})
+        self.assertFalse(self.calls)
+
     def test_element_routes_resolve_identity_and_preserve_the_payload(self):
         target = {k: v for k, v in TARGET.items() if k != "point"}
         for suffix in ("click", "value", "clear"):

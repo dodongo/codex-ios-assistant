@@ -1,6 +1,6 @@
 # Codex iOS Assistant
 
-Codex iOS Assistant lets Codex on a Mac control an iPhone. The `iphone` CLI sends private commands through iMessage. An iOS Shortcut runs the requested action and returns context from your iPhone back to your Mac.
+Codex iOS Assistant lets Codex on a Mac control an iPhone. The `iphone` CLI uses WebDriverAgent for navigation and screen control. An iMessage-triggered Shortcut handles native timers, alarms, flashlight, Low Power Mode, calls, and clipboard actions.
 
 > [!TIP]
 > This project is meant to be installed with Codex! To install it, please paste this message into a new Codex thread on your Mac:
@@ -88,7 +88,7 @@ brew install steipete/tap/imsg
 
 Configuration has three values: the iMessage address that reaches your iPhone, the Mac's private Tailscale HTTPS origin, and a generated receiver token. The installer derives the origin from `tailscale status` and stores the values in `~/.config/codex-ios-assistant/`, outside the repository.
 
-`scripts/copy-shortcut` puts 95 native Shortcuts actions on the Mac clipboard. Paste them once into a blank shortcut and name it `iOS Assistant`. After iCloud syncs it to your iPhone, create the automation that listens for commands:
+`scripts/copy-shortcut` puts 70 native Shortcuts actions on the Mac clipboard. Paste them once into a blank shortcut and name it `iOS Assistant`. After iCloud syncs it to your iPhone, create the automation that listens for commands:
 
 1. Open Shortcuts > Automation, tap the plus sign at the bottom, then choose New Automation > Message.
 2. Under `When I receive a message where`, set `Sender is` to your own iMessage contact.
@@ -102,19 +102,19 @@ You must create this automation by hand in the Shortcuts app on your iPhone. Fol
 ```bash
 iphone doctor
 curl http://127.0.0.1:8787/health
-iphone home
-iphone screen capture --timeout 30
+iphone flashlight on
+iphone flashlight off
 iphone alarm list --timeout 30
 ```
 
-`iphone home` returns `requested` after Messages accepts the command. Commands that wait for data from the phone, including `screen capture` and `alarm list`, return `completed` after the matching response reaches the Mac.
+Shortcut writes return `requested` after Messages accepts the command. Clipboard and alarm reads return `completed` after the matching response reaches the Mac. App-opening helpers require an active UI session and use the same WebDriverAgent request path as `iphone ui request`.
 
 ## Files
 
 | Path | Contents |
 | --- | --- |
 | `src/iphone_cli/` | CLI, Messages bridge, receiver, and URL builders |
-| `shortcut/actions.template.plist` | Sanitized 95-action Shortcut template |
+| `shortcut/actions.template.plist` | Sanitized 70-action Shortcut template |
 | `scripts/` | Install, configuration, Tailscale Serve, LaunchAgent, and clipboard tools |
 | `skills/iphone-control/` | Codex skill installed under `~/.agents/skills` |
 | `contacts/` | Swift Contacts search helper |

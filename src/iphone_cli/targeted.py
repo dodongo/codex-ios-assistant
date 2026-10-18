@@ -28,7 +28,7 @@ class TargetedRequest:
                 raise ValueError("target and ensure must be bounded JSON objects")
             self.target = json.loads(args.target)
             self.ensure = json.loads(args.ensure) if args.ensure is not None else None
-            if not isinstance(self.target, dict) or set(self.target) - {"bundleId", "using", "value", "point"}:
+            if not isinstance(self.target, dict) or set(self.target) - {"bundleId", "using", "value", "point", "end"}:
                 raise ValueError("invalid target fields")
             ui._bundle(self.target.get("bundleId"))
             if self.target.get("using") not in {"predicate string", "accessibility id", "class chain"}:
@@ -55,6 +55,10 @@ class TargetedRequest:
             if getattr(args, "snapshot", None):
                 raise ValueError("targeted requests use live element checks rather than snapshots")
             point = self.target.get("point")
+            end = self.target.get("end")
+            if "end" in self.target and (path != "/actions" or not isinstance(end, dict) or set(end) != {"x", "y"}
+                    or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in end.values())):
+                raise ValueError("end requires x/y fractions within the live target for a pointer swipe")
             if path in {"/wda/tap", "/actions"}:
                 if (not isinstance(point, dict) or set(point) != {"x", "y"}
                         or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in point.values())):
@@ -140,9 +144,17 @@ class TargetedRequest:
             if any(not math.isfinite(v) or v < 0 for v in body.values()):
                 raise IPhoneError("Target resolves to an invalid screen coordinate.")
             if self.path == "/actions":
+                move = []
+                if "end" in self.target:
+                    end = {axis: rect[axis] + rect[size] * self.target["end"][axis]
+                           for axis, size in (("x", "width"), ("y", "height"))}
+                    if any(not math.isfinite(v) or v < 0 for v in end.values()):
+                        raise IPhoneError("Swipe resolves to an invalid screen coordinate.")
+                    move = [{"type": "pointerMove", "duration": 300, "origin": "viewport", **end}]
                 body = {"actions": [{"type": "pointer", "id": "target", "parameters": {"pointerType": "touch"}, "actions": [
                     {"type": "pointerMove", "duration": 0, "origin": "viewport", **body},
                     {"type": "pointerDown", "button": 0}, {"type": "pause", "duration": 50},
+                    *move,
                     {"type": "pointerUp", "button": 0},
                 ]}]}
         self._foreground()

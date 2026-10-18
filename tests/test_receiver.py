@@ -7,14 +7,19 @@ import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from iphone_cli.receiver import ALARMS, CLIPBOARDS, TEXTS, Handler
+from iphone_cli.receiver import ALARMS, CLIPBOARDS, Handler
 
 
 class ReceiverTests(unittest.TestCase):
     token = "test-token-that-is-longer-than-thirty-two-characters"
 
+    def test_removed_screen_uploads_are_not_supported(self):
+        for path in ("/text", "/screentext", "/photo", "/screenshot", "/shot"):
+            with self.subTest(path=path):
+                status, _ = self.request("POST", path, body=b"removed")
+                self.assertEqual(status, 404)
+
     def setUp(self):
-        TEXTS.clear()
         CLIPBOARDS.clear()
         ALARMS.clear()
         self.temporary = tempfile.TemporaryDirectory()
@@ -61,49 +66,9 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"receiver up", body)
 
-        status, _ = self.request("GET", "/text/12345", authenticated=False)
+        status, _ = self.request("GET", "/clipboard/12345", authenticated=False)
         self.assertEqual(status, 403)
 
-    def test_screen_text_round_trip_and_delete(self):
-        payload = json.dumps(
-            {
-                "screen": "Wi-Fi\nConnected",
-                "current_app": "Settings",
-                "selected_text": "Home Network",
-                "messages": "No alerts",
-                "urls": "https://example.com",
-            }
-        ).encode()
-        status, _ = self.request(
-            "POST",
-            "/text",
-            body=payload,
-            headers={"Content-Type": "application/json", "X-Screenshot-Id": "12345"},
-        )
-        self.assertEqual(status, 200)
-
-        status, body = self.request("GET", "/text/12345")
-        self.assertEqual(status, 200)
-        value = body.decode()
-        self.assertIn("current app is **Settings**", value)
-        self.assertIn("<selected_text>\nHome Network", value)
-        self.assertIn("<screen>\nWi-Fi\nConnected", value)
-
-        status, _ = self.request("DELETE", "/text/12345")
-        self.assertEqual(status, 204)
-        status, _ = self.request("GET", "/text/12345")
-        self.assertEqual(status, 404)
-
-    def test_screenshot_is_saved_by_correlated_id(self):
-        image = b"\x89PNG\r\n\x1a\n" + b"test-image"
-        status, _ = self.request(
-            "POST",
-            "/photo",
-            body=image,
-            headers={"Content-Type": "image/png", "X-Screenshot-Id": "23456"},
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual((Path(self.temporary.name) / "shot-23456.png").read_bytes(), image)
 
     def test_empty_clipboard_round_trip(self):
         status, _ = self.request(
