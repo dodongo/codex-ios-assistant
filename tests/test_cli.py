@@ -26,6 +26,22 @@ def run_cli(*arguments: str, env: dict[str, str] | None = None) -> subprocess.Co
 
 
 class CLITests(unittest.TestCase):
+    def test_screen_read_timeout_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / "screen-read"
+            helper.write_text('#!/bin/sh\nprintf "%s" "$READ_SCREEN_TIMEOUT"\n')
+            helper.chmod(0o755)
+            for arguments, expected in (
+                (("screen", "read"), "60"),
+                (("--timeout", "12", "screen", "read"), "12"),
+                (("screen", "--timeout", "14", "read"), "14"),
+                (("screen", "read", "--timeout", "16"), "16"),
+            ):
+                with self.subTest(arguments=arguments):
+                    result = run_cli(*arguments, env={"IPHONE_READ_SCREEN_COMMAND": str(helper)})
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), expected)
+
     def test_alarm_off_normalizes_time(self):
         result = run_cli(
             "alarm",

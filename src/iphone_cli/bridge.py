@@ -198,7 +198,7 @@ def _timeout(environment_name: str, default: int) -> int:
 
 
 def read_screen() -> None:
-    timeout = _timeout("READ_SCREEN_TIMEOUT", 30)
+    timeout = _timeout("READ_SCREEN_TIMEOUT", 60)
     started = time.monotonic()
     image = request_screen_capture(timeout=timeout)
     remaining = max(1, int(timeout - (time.monotonic() - started)))

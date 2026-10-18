@@ -112,7 +112,7 @@ def _global_parent() -> argparse.ArgumentParser:
         type=_timeout,
         default=argparse.SUPPRESS,
         metavar="SECONDS",
-        help="maximum wait for the iPhone or a helper (default: 30)",
+        help="maximum wait in seconds (default: 60 for screen read, 30 otherwise)",
     )
     parent.add_argument(
         "--version",
@@ -1114,7 +1114,7 @@ def main(argv: list[str] | None = None) -> int:
             result = execute(
                 outcome,
                 dry_run=getattr(args, "dry_run", False),
-                timeout=getattr(args, "timeout", 30),
+                timeout=getattr(args, "timeout", 60 if outcome.kind == "screen-read" else 30),
                 output=getattr(args, "output", None),
             )
         _emit(result, args)
