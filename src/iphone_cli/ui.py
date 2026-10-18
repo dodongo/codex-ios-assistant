@@ -291,7 +291,9 @@ def supervise(nonce: str) -> None:
             else:
                 raise IPhoneError("UI startup timed out: " + last_error)
             _unlocked(config, 8, address)
+            from .targeted import CAPABILITIES
             result = _http(address, "/session", {"capabilities": {"alwaysMatch": {
+                **CAPABILITIES,
                 "forceAppLaunch": False, "shouldTerminateApp": False,
             }}})
             if not isinstance(result, dict) or not isinstance(result.get("sessionId"), str):
@@ -337,6 +339,7 @@ def supervise(nonce: str) -> None:
 
 def handle_ui(args: argparse.Namespace) -> Result:
     """Execute the explicit UI CLI operation without using the Shortcut bridge."""
+    started = time.monotonic()
     action = args.action
     if action not in {"configure", "start", "status", "stop", "request"}:
         raise IPhoneError("Unsupported UI action; use iphone ui request for device commands.")
@@ -414,7 +417,13 @@ def handle_ui(args: argparse.Namespace) -> Result:
                         body.setdefault("idleTimeoutMs", min(timeout, 2) * 1000)
             else:
                 _bundle(body.get("bundleId"))
-        needs_snapshot = not query and (not navigation or getattr(args, "snapshot", None) is not None)
+        targeted = None
+        if getattr(args, "target", None) is not None:
+            from .targeted import TargetedRequest
+            targeted = TargetedRequest(args, decoded, body)
+        elif getattr(args, "ensure", None) is not None:
+            raise IPhoneError("--ensure requires --target.")
+        needs_snapshot = targeted is None and not query and (not navigation or getattr(args, "snapshot", None) is not None)
         if needs_snapshot and getattr(args, "snapshot", None) is None:
             raise IPhoneError("UI changes require --snapshot from a request with --observe.")
         if needs_snapshot:
@@ -433,7 +442,8 @@ def handle_ui(args: argparse.Namespace) -> Result:
         if action == "request":
             return Result("ui", action, "dry-run", f"{method} {scope}:{request_path} (no device contacted)",
                           {"method": method, "scope": scope, "path": request_path, "body": body,
-                           "observe": getattr(args, "observe", False), "snapshot": getattr(args, "snapshot", None)})
+                           "observe": getattr(args, "observe", False), "snapshot": getattr(args, "snapshot", None),
+                           **({"target": targeted.target, "ensure": targeted.ensure} if targeted else {})})
         return Result("ui", action, "dry-run", f"iphone ui {action} (no device contacted)", {})
     ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
     ROOT.chmod(0o700)
@@ -531,6 +541,15 @@ def handle_ui(args: argparse.Namespace) -> Result:
             if not isinstance(args.duration, int) or not 10 <= args.duration <= 600:
                 raise IPhoneError("UI session duration must be between 10 and 600 seconds.")
             if (ROOT / "state.json").exists() and _read(ROOT / "state.json").get("status") in {"running", "starting"}:
+                if getattr(args, "reuse", False):
+                    state = _active()
+                    requested_tailnet = getattr(args, "tailnet_address", None)
+                    if requested_tailnet is not None and state.get("tailnet") != requested_tailnet:
+                        raise IPhoneError("Running session uses a different transport endpoint.")
+                    _unlocked(config, timeout, state["address"])
+                    return Result("ui", action, "completed", "Reusing the unlocked UI controller.",
+                                  {"deadline": state["deadline"], "address": state["address"],
+                                   "return_app": config["return_app"], "reused": True})
                 raise IPhoneError("A UI session already exists; stop it before starting another.")
             tailnet = getattr(args, "tailnet_address", None)
             if tailnet is not None:
@@ -610,9 +629,9 @@ def handle_ui(args: argparse.Namespace) -> Result:
             if not query:
                 _active()
             try:
-                value = _http(address, path, body, timeout, method=method)
+                value = targeted.execute(address, prefix, timeout - (time.monotonic() - started), state) if targeted else _http(address, path, body, timeout, method=method)
             except IPhoneError as error:
-                if not query:
+                if not query and targeted is None:
                     raise IPhoneError(f"Request outcome is unknown; observe before retrying. {error}") from error
                 raise
             if scope == "device" and decoded == "/session" and method == "POST":
@@ -700,8 +719,8 @@ def handle_ui(args: argparse.Namespace) -> Result:
                 data["output"] = str(destination.resolve())
             else:
                 data["value"] = value
-            return Result("ui", action, "completed" if query else "requested",
-                          "WebDriverAgent response received." if query else "Request dispatched; observe to verify its effect.", data)
+            return Result("ui", action, "completed" if query or targeted else "requested",
+                          "Target state verified." if targeted else "WebDriverAgent response received." if query else "Request dispatched; observe to verify its effect.", data)
         raise IPhoneError("Unsupported UI action: " + action)
 
 

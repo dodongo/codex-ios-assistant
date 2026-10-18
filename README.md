@@ -37,6 +37,8 @@ Observed deep links with a `bundleId` wait for native UI idle for up to two seco
 
 Observed activation and deep links wait for the target `bundleId` to become foreground before scanning, avoiding expensive scans of the previous app. Observation controls omit inaccessible layout containers. Use `--verbose` for per-request durations and response sizes; payloads and query values are not logged.
 
+For known controls, `request --target '<selector JSON>' --ensure '{"attribute":"value","equals":"1"}'` uses live app-bound element checks instead of full-screen scans. The target names `bundleId`, `using`, and selector `value`; pointer routes (`POST /actions` or `/wda/tap`) also take `point` x/y fractions within the live control rectangle. Element routes use `/element/{id}/click`, `/value`, or `/clear`. The controller requires one visible, enabled target in the foreground app, skips an already-correct value, dispatches at most once, and verifies the desired state through read-only polling. The timeout and session deadline bound the operation. Unknown screens still use observation and snapshots. `start --reuse --duration 600` keeps an existing unlocked session warm without extending its original deadline.
+
 ```bash
 iphone ui request POST /url --data '{"url":"App-prefs:com.openai.chat","bundleId":"com.apple.Preferences"}' --observe --json
 iphone ui request POST /wda/keys --data '{"value":["ChatGPT"]}' --snapshot '<observation UUID>' --observe --json

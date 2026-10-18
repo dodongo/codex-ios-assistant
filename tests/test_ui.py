@@ -118,6 +118,29 @@ class UITests(unittest.TestCase):
         self.assertTrue(self.http_calls[-1][0].endswith("/session/SESSION-ID/url"))
         self.assertEqual(len(self.http_calls), 2)
 
+    def test_targeted_request_returns_verified_noop_without_screenshots(self):
+        self.element_results = [{"element-6066-11e4-a52e-4f735466cecf": "ABC-123", "enabled": True,
+                                 "displayed": True, "attribute/value": "1"}]
+        result = self.request("POST", "/wda/tap", target=json.dumps({"bundleId": "com.apple.Preferences",
+                              "using": "predicate string", "value": 'name == "Known"', "point": {"x": 0.9, "y": 0.5}}),
+                              ensure='{"attribute":"value","equals":"1"}')
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.data["value"]["changed"], False)
+        self.assertFalse(any(url.endswith(("/source", "/screenshot", "/wda/tap")) for url, _ in self.http_calls))
+
+    def test_start_reuses_an_unlocked_session_without_extending_it(self):
+        before = ui._read(self.root / "state.json")
+        result = self.call("start", duration=600, reuse=True)
+        self.assertTrue(result.data["reused"])
+        self.assertEqual(ui._read(self.root / "state.json"), before)
+        self.locked = True
+        with self.assertRaisesRegex(IPhoneError, "Unlock"):
+            self.call("start", duration=600, reuse=True)
+
+    def test_start_reuse_rejects_a_different_transport_endpoint(self):
+        with self.assertRaisesRegex(IPhoneError, "different transport"):
+            self.call("start", duration=600, reuse=True, tailnet_address="100.64.0.1")
+
     def test_request_rejects_unsafe_app_links_before_contacting_device(self):
         for url in ["file:///private", "javascript:alert(1)", "data:text/plain,test", "not a URL", "foo://[", "foo:test\n"]:
             with self.subTest(url=url), self.assertRaises(IPhoneError):

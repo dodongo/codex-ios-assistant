@@ -29,7 +29,9 @@ The CLI opens message drafts for review. It does not send them. Commerce and rid
 
 ## UI sessions
 
-Optional Tailscale UI sessions authenticate with the configured phone's RemotePairing record and verify its device identifier. The userspace developer tunnel requires no root access. Its local controller relay uses a mode-`0600` Unix socket inside the private UI directory, rather than a TCP listener. Sessions last at most 600 seconds and stop on lock or connection failure. Each action checks the lock state again and uses fresh, single-use observations for taps. Wi-Fi-to-cellular handoff checks may wait up to 30 seconds; they do not replay actions.
+Optional Tailscale UI sessions authenticate with the configured phone's RemotePairing record and verify its device identifier. The userspace developer tunnel requires no root access. Its local controller relay uses a mode-`0600` Unix socket inside the private UI directory, rather than a TCP listener. Sessions last at most 600 seconds and stop on lock or connection failure. Each action checks the lock state again and uses fresh, single-use observations or live app-bound targets for taps. Wi-Fi-to-cellular handoff checks may wait up to 30 seconds; they do not replay actions.
+
+Targeted requests bind a native selector to an explicit foreground app and require exactly one live, visible, enabled control. They replace screen snapshots with live target validation and an explicit desired attribute value. The controller rechecks the app, session identity, and lock before dispatch, then verifies state with read-only queries. An uncertain or unverified write is never replayed. Reusing a warm session preserves its original expiry and lock watchdog.
 
 ## Check a commit
 

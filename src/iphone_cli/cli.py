@@ -1044,6 +1044,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure.set_defaults(handler=handle_ui)
     start = _action_parser(ui, global_parent, "start", help="start a finite UI session; default 120 seconds")
     start.add_argument("--duration", type=_positive_int, default=120, help="session lifetime, 10–600 seconds")
+    start.add_argument("--reuse", action="store_true", help="reuse a healthy running session without extending its deadline")
     start.add_argument("--tailnet-address", help="iPhone Tailscale IP; start on Wi-Fi, then keep this session on cellular (requires tailnet extra)")
     start.set_defaults(handler=handle_ui)
     for action, description in [("status", "inspect session state"), ("stop", "stop the test runner")]:
@@ -1053,6 +1054,8 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("path", help="endpoint path relative to the selected scope, including optional query parameters")
     request.add_argument("--scope", choices=("session", "device"), default="session", help="session-relative or device-level endpoint (default: session)")
     request.add_argument("--data", help="JSON object, or - to read JSON from stdin")
+    request.add_argument("--target", help="live selector JSON: bundleId, using, value, and point x/y fractions for pointer requests")
+    request.add_argument("--ensure", help="desired control state JSON: attribute and equals; verify live state and dispatch at most once")
     request.add_argument("--snapshot", help="fresh observation UUID; required for UI changes")
     request.add_argument("--output", help="save the returned JSON value to a new private file")
     request.add_argument("--observe", action="store_true", help="include a fresh screenshot, accessibility controls, and single-use observation UUID after the request")

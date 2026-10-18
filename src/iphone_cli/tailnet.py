@@ -155,8 +155,9 @@ async def _serve(nonce: str, state: dict) -> None:
             else:
                 raise IPhoneError("Tailscale UI startup timed out: " + last_error)
             await asyncio.to_thread(ui._unlocked, config, min(5, remaining()), address)
+            from .targeted import CAPABILITIES
             session = await asyncio.to_thread(ui._http, address, "/session", {
-                "capabilities": {"alwaysMatch": {"forceAppLaunch": False, "shouldTerminateApp": False}},
+                "capabilities": {"alwaysMatch": {**CAPABILITIES, "forceAppLaunch": False, "shouldTerminateApp": False}},
             }, timeout=min(10, remaining()))
             if not isinstance(session, dict) or not isinstance(session.get("sessionId"), str):
                 raise IPhoneError("WebDriverAgent did not create a session.")
