@@ -85,6 +85,8 @@ class UITests(unittest.TestCase):
             value = base64.b64encode(b"\x89PNG\r\n\x1a\nPNG test payload").decode()
         elif request.full_url.endswith("/wda/locked"):
             value = self.locked
+        elif request.full_url.endswith("/wda/activeAppInfo"):
+            value = {"bundleId": "com.apple.Preferences"}
         elif request.full_url.endswith("/elements"):
             value = self.element_results
         elif request.full_url.endswith("/wda/apps/state"):
@@ -151,6 +153,53 @@ class UITests(unittest.TestCase):
             self.source = source
             with self.subTest(source=source), self.assertRaisesRegex(IPhoneError, "observation failed"):
                 self.observe()
+
+    def test_navigation_waits_for_the_target_foreground_before_capturing(self):
+        original = ui._http
+        apps = iter(("com.openai.chat", "com.apple.Preferences"))
+        events = []
+
+        def transitioning(address, path, *args, **kwargs):
+            events.append(path)
+            if path == "/wda/activeAppInfo":
+                return {"bundleId": next(apps)}
+            return original(address, path, *args, **kwargs)
+
+        with patch.object(ui, "_http", side_effect=transitioning), patch.object(ui.time, "sleep"):
+            self.request("POST", "/url", data='{"url":"App-prefs:com.openai.chat","bundleId":"com.apple.Preferences"}', observe=True)
+        self.assertEqual(events[2:5], ["/wda/activeAppInfo", "/wda/activeAppInfo", "/session/SESSION-ID/source"])
+        self.assertEqual(sum(path.endswith("/url") for path in events), 1)
+
+    def test_observations_omit_inaccessible_containers_from_controls(self):
+        self.source = '<App visible="true" accessible="false"><Button name="Tap" visible="true" accessible="true"/></App>'
+        result = self.observe()
+        self.assertEqual([e["name"] for e in result.data["elements"]], ["Tap"])
+        self.assertEqual(result.data["total"], 1)
+
+    def test_foreground_wait_times_out_without_scanning_or_replaying(self):
+        original = ui._http
+        clock = [0]
+
+        def wrong_app(address, path, *args, **kwargs):
+            if path == "/wda/activeAppInfo":
+                clock[0] += 1
+                return {"bundleId": "com.openai.chat"}
+            return original(address, path, *args, **kwargs)
+
+        with patch.object(ui, "_http", side_effect=wrong_app), patch.object(ui.time, "monotonic", side_effect=lambda: clock[0]), patch.object(ui.time, "sleep"):
+            with self.assertRaisesRegex(IPhoneError, "observation failed.*deadline"):
+                self.request("POST", "/url", data='{"url":"App-prefs:com.openai.chat","bundleId":"com.apple.Preferences"}', observe=True)
+        self.assertEqual(sum(url.endswith("/url") for url, _ in self.http_calls), 1)
+        self.assertFalse(any(url.endswith("/source") for url, _ in self.http_calls))
+
+    def test_request_timing_logs_exclude_payload_and_query_values(self):
+        with self.assertLogs("iphone_cli.ui", level="DEBUG") as logs:
+            ui._http(self.address, "/custom?secret=hidden", {"value": "private"})
+        message = " ".join(logs.output)
+        self.assertIn("WDA POST /custom", message)
+        self.assertIn("bytes", message)
+        self.assertNotIn("hidden", message)
+        self.assertNotIn("private", message)
 
     def test_observation_retries_capture_not_the_action_during_a_transition(self):
         original = ui._http

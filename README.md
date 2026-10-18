@@ -35,6 +35,8 @@ After startup succeeds, the phone can switch to cellular while that session rema
 
 Observed deep links with a `bundleId` wait for native UI idle for up to two seconds by default (`idleTimeoutMs` overrides this). Observations check the accessibility tree before and after the screenshot and retry capture, never the action, if the tree changes. Capture must settle within the observation timeout and session lifetime. Verify the returned screen and control values before claiming that a change succeeded.
 
+Observed activation and deep links wait for the target `bundleId` to become foreground before scanning, avoiding expensive scans of the previous app. Observation controls omit inaccessible layout containers. Use `--verbose` for per-request durations and response sizes; payloads and query values are not logged.
+
 ```bash
 iphone ui request POST /url --data '{"url":"App-prefs:com.openai.chat","bundleId":"com.apple.Preferences"}' --observe --json
 iphone ui request POST /wda/keys --data '{"value":["ChatGPT"]}' --snapshot '<observation UUID>' --observe --json

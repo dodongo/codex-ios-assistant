@@ -10,6 +10,7 @@ import hashlib
 import http.client
 import ipaddress
 import json
+import logging
 import math
 import os
 import plistlib
@@ -121,6 +122,7 @@ def _address(value: str) -> str:
 
 
 def _http(address: str, path: str, payload: dict | None = None, timeout: float = 10, *, method: str | None = None):
+    started = time.monotonic()
     address = _address(address)
     method = method or ("GET" if payload is None else "POST")
     if address.startswith("unix:"):
@@ -142,6 +144,7 @@ def _http(address: str, path: str, payload: dict | None = None, timeout: float =
             raise IPhoneError(f"Private tunnel request failed for {path}: {error}") from error
         finally:
             connection.close()
+        logging.getLogger(__name__).debug("WDA %s %s %.3fs %d bytes", method, path.split("?", 1)[0], time.monotonic() - started, len(data))
         return _response(path, data)
     request = urllib.request.Request(
         f"http://[{address}]:{PORT}{path}",
@@ -158,6 +161,7 @@ def _http(address: str, path: str, payload: dict | None = None, timeout: float =
         raise IPhoneError(f"WebDriverAgent HTTP {error.code}: {detail}") from error
     except (URLError, OSError) as error:
         raise IPhoneError(f"Developer tunnel request failed: {error}") from error
+    logging.getLogger(__name__).debug("WDA %s %s %.3fs %d bytes", method, path.split("?", 1)[0], time.monotonic() - started, len(data))
     return _response(path, data)
 
 
@@ -635,6 +639,14 @@ def handle_ui(args: argparse.Namespace) -> Result:
                             raise IPhoneError("UI did not settle before the observation deadline.")
                         return budget
 
+                    if navigation and "bundleId" in body:
+                        while True:
+                            foreground = _http(address, "/wda/activeAppInfo", timeout=remaining())
+                            if not isinstance(foreground, dict) or not isinstance(foreground.get("bundleId"), str):
+                                raise IPhoneError("Invalid foreground application response.")
+                            if foreground["bundleId"] == body["bundleId"]:
+                                break
+                            time.sleep(min(0.1, remaining()))
                     source = value if method == "GET" and request_path == "/source" else _http(address, prefix + "/source", timeout=remaining())
                     while True:
                         if not isinstance(source, str) or "<!DOCTYPE" in source or "<!ENTITY" in source:
@@ -672,8 +684,9 @@ def handle_ui(args: argparse.Namespace) -> Result:
                         "nonce": state["nonce"], "session": state["session"], "created": time.time(),
                         "digest": hashlib.sha256(source.encode()).hexdigest(), "elements": elements,
                     })
-                    data.update(snapshot=snapshot, screenshot=str(picture), elements=elements[:200],
-                                total=len(elements), truncated=len(elements) > 200)
+                    controls = [element for element in elements if element.get("accessible") != "false"]
+                    data.update(snapshot=snapshot, screenshot=str(picture), elements=controls[:200],
+                                total=len(controls), truncated=len(controls) > 200)
                 except (IPhoneError, OSError) as error:
                     raise IPhoneError(f"Request was dispatched, but its observation failed: {error}") from error
             if destination is not None:

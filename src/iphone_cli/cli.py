@@ -1102,6 +1102,10 @@ def _emit(result: Result, args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if getattr(args, "resource", None) == "ui" and getattr(args, "verbose", False):
+        import logging
+        logging.basicConfig(format="%(message)s")
+        logging.getLogger("iphone_cli.ui").setLevel(logging.DEBUG)
     if not hasattr(args, "handler"):
         args._help_parser.print_help()
         return 0
