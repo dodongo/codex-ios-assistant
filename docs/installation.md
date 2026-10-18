@@ -177,7 +177,6 @@ Messages should show `hola homescreen`, and the iPhone should open its Home Scre
 Test the response paths:
 
 ```bash
-iphone screen read --timeout 30
 iphone screen capture --timeout 45
 iphone alarm list --timeout 30
 iphone clipboard get --timeout 30

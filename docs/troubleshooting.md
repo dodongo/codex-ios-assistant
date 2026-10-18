@@ -57,7 +57,7 @@ On the iPhone, run the Shortcut by hand and grant access to the hostname when iO
 
 ## A response command times out
 
-The CLI polls every 0.5 seconds. Screen text, alarms, and clipboard commands wait 30 seconds by default; screenshots wait 45 seconds.
+The CLI polls every 0.5 seconds. Screenshot, alarm, and clipboard commands wait 30 seconds by default.
 
 Check the path in order:
 
@@ -70,7 +70,7 @@ Check the path in order:
 Increase the timeout for a slow phone without changing the default:
 
 ```bash
-iphone screen read --timeout 60
+iphone screen capture --timeout 60
 ```
 
 ## `imsg` cannot find PhoneNumberKit

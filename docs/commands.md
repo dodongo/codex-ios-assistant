@@ -16,7 +16,6 @@ iphone --json --dry-run weather open --location Chicago --lat 41.8781 --lng -87.
 ## Screen, clipboard, and alarms
 
 ```bash
-iphone screen read --timeout 30
 iphone screen capture --timeout 45
 iphone screen capture --output ~/Desktop/iphone.png
 iphone clipboard get

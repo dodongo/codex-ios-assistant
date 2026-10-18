@@ -11,7 +11,7 @@ Codex iOS Assistant lets Codex on a Mac control an iPhone. The `iphone` CLI send
 
 ## Supported commands
 
-- Read visible text or save a screenshot from the iPhone.
+- Capture the iPhone screen for direct image inspection.
 - Read and replace the clipboard.
 - List enabled alarms, create an alarm, or disable alarms at a given time.
 - Open Camera, Weather, Calendar, Calculator, Messages, Find My, Spotify, Photos, Wallet, Notes, Books, App Store, Uber, and DoorDash.
@@ -77,11 +77,11 @@ You must create this automation by hand in the Shortcuts app on your iPhone. Fol
 iphone doctor
 curl http://127.0.0.1:8787/health
 iphone home
-iphone screen read --timeout 30
+iphone screen capture --timeout 30
 iphone alarm list --timeout 30
 ```
 
-`iphone home` returns `requested` after Messages accepts the command. Commands that wait for data from the phone, including `screen read` and `alarm list`, return `completed` after the matching response reaches the Mac.
+`iphone home` returns `requested` after Messages accepts the command. Commands that wait for data from the phone, including `screen capture` and `alarm list`, return `completed` after the matching response reaches the Mac.
 
 ## Files
 

@@ -48,7 +48,7 @@ Data endpoints require the receiver token in `X-Auth`. The Shortcut puts the req
 | `hola getclipboard <id>` | Text or JSON to `POST /clipboard` | Poll `GET /clipboard/<id>` for up to 30 seconds |
 | `hola alarm get <id>` | Alarm data to `POST /get-alarm` | Poll `GET /get-alarm/<id>` for up to 30 seconds |
 
-The receiver keeps up to 200 legacy screen-text, clipboard, and alarm responses in memory. It saves screenshots under `~/.local/share/codex-ios-assistant/inbox/`. `iphone screen read` runs Apple Vision OCR locally on a temporary returned screenshot and removes that image after recognition. Explicit `iphone screen capture` results remain on disk. Restarting the receiver clears the in-memory values.
+The receiver keeps up to 200 legacy screen-text, clipboard, and alarm responses in memory. It saves screenshots under `~/.local/share/codex-ios-assistant/inbox/`. `iphone screen capture` returns the original image path for direct inspection by the assistant. Screenshots remain on disk until removed. Restarting the receiver clears the in-memory values.
 
 ## CLI status values
 

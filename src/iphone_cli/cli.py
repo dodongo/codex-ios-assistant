@@ -112,7 +112,7 @@ def _global_parent() -> argparse.ArgumentParser:
         type=_timeout,
         default=argparse.SUPPRESS,
         metavar="SECONDS",
-        help="maximum wait in seconds (default: 60 for screen read, 30 otherwise)",
+        help="maximum wait for the iPhone or a helper in seconds (default: 30)",
     )
     parent.add_argument(
         "--version",
@@ -412,10 +412,6 @@ def _handle_app_store(args: argparse.Namespace) -> Operation:
     )
 
 
-def _handle_screen_read(args: argparse.Namespace) -> Operation:
-    return Operation(resource="screen", action="read", kind="screen-read")
-
-
 def _handle_screen_capture(args: argparse.Namespace) -> Operation:
     return Operation(resource="screen", action="capture", kind="screen-capture")
 
@@ -577,7 +573,7 @@ def build_parser() -> argparse.ArgumentParser:
   iphone alarm set '7:30 AM' --label 'Wake up'
   iphone alarm list
   iphone alarm off '7:30 AM'
-  iphone screen read
+  iphone screen capture
   iphone --dry-run calendar open --date 2027-01-01
 """,
     )
@@ -917,12 +913,10 @@ def build_parser() -> argparse.ArgumentParser:
         resources,
         "screen",
         global_parent,
-        help="read or capture the iPhone screen",
-        description="Use 'iphone screen read' for visible text, or 'iphone screen capture' for a screenshot.",
-        epilog="examples:\n  iphone screen read\n  iphone screen capture --output ~/Desktop/iphone.png",
+        help="capture the iPhone screen",
+        description="Capture the iPhone screen for direct image inspection.",
+        epilog="examples:\n  iphone screen capture\n  iphone screen capture --output ~/Desktop/iphone.png",
     )
-    screen_read = _action_parser(screen, global_parent, "read", help="return visible screen text")
-    screen_read.set_defaults(handler=_handle_screen_read)
     screen_capture = _action_parser(screen, global_parent, "capture", help="save a screenshot")
     screen_capture.add_argument("-o", "--output", help="copy screenshot to this path")
     screen_capture.set_defaults(handler=_handle_screen_capture)
@@ -1114,7 +1108,7 @@ def main(argv: list[str] | None = None) -> int:
             result = execute(
                 outcome,
                 dry_run=getattr(args, "dry_run", False),
-                timeout=getattr(args, "timeout", 60 if outcome.kind == "screen-read" else 30),
+                timeout=getattr(args, "timeout", 30),
                 output=getattr(args, "output", None),
             )
         _emit(result, args)

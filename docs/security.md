@@ -1,6 +1,6 @@
 # Security
 
-This project connects Codex, Messages, an iPhone Shortcut, and a private Tailscale HTTPS origin. Screen text, screenshots, clipboard contents, alarms, Contacts, and Messages history may contain private data. Screen OCR runs locally on the Mac with Apple's Vision framework, and its temporary screenshot is removed after recognition.
+This project connects Codex, Messages, an iPhone Shortcut, and a private Tailscale HTTPS origin. Screen text, screenshots, clipboard contents, alarms, Contacts, and Messages history may contain private data. Screen capture returns the original image for direct inspection by the assistant, so its visible contents enter the assistant's context when viewed.
 
 ## Files that must stay private
 

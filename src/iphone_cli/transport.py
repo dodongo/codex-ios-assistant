@@ -20,7 +20,6 @@ from .config import CONFIG_FILE, file_values, receiver_url, sender_socket
 
 OperationKind = Literal[
     "hola",
-    "screen-read",
     "screen-capture",
     "clipboard-read",
     "alarm-read",
@@ -66,10 +65,6 @@ def command_for(operation: Operation) -> list[str]:
             "hola",
             *operation.arguments,
         ]
-    if operation.kind == "screen-read":
-        return command_from_environment(
-            "IPHONE_READ_SCREEN_COMMAND", bridge_command("read-screen")
-        )
     if operation.kind == "screen-capture":
         return command_from_environment(
             "IPHONE_SCREENSHOT_COMMAND", bridge_command("screenshot")
@@ -133,7 +128,6 @@ def execute(
         )
 
     environment = os.environ.copy()
-    environment["READ_SCREEN_TIMEOUT"] = str(max(1, int(timeout)))
     environment["SCREENSHOT_TIMEOUT"] = str(max(1, int(timeout)))
     environment["CLIPBOARD_TIMEOUT"] = str(max(1, int(timeout)))
     environment["ALARM_TIMEOUT"] = str(max(1, int(timeout)))
@@ -148,16 +142,6 @@ def execute(
             status="requested",
             summary=operation.summary,
             data=common,
-        )
-
-    if operation.kind == "screen-read":
-        stdout = stdout.strip()
-        return Result(
-            resource=operation.resource,
-            action=operation.action,
-            status="completed",
-            summary=stdout,
-            data={**common, "text": stdout},
         )
 
     if operation.kind == "clipboard-read":

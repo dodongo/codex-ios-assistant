@@ -18,7 +18,6 @@ from urllib.request import Request, urlopen
 
 from .config import DATA_DIR, message_target, receiver_token, receiver_url, sender_socket
 from .errors import IPhoneError
-from .ocr import recognize_text
 
 
 MAX_COMMAND_BYTES = 4096
@@ -197,21 +196,6 @@ def _timeout(environment_name: str, default: int) -> int:
     return max(1, value)
 
 
-def read_screen() -> None:
-    timeout = _timeout("READ_SCREEN_TIMEOUT", 60)
-    started = time.monotonic()
-    image = request_screen_capture(timeout=timeout)
-    remaining = max(1, int(timeout - (time.monotonic() - started)))
-    try:
-        text = recognize_text(image, timeout=remaining)
-    finally:
-        try:
-            image.unlink()
-        except OSError:
-            pass
-    sys.stdout.write(f"<screen>\n{text}\n</screen>\n")
-
-
 def read_clipboard() -> None:
     request_id = _correlation_id()
     _receiver_request("DELETE", f"/clipboard/{request_id}")
@@ -258,7 +242,6 @@ def build_parser() -> argparse.ArgumentParser:
     send = commands.add_parser("send", help="send one command through the sender agent")
     send.add_argument("words", nargs="+")
     commands.add_parser("sender", help="run the per-user sender agent")
-    commands.add_parser("read-screen", help="request and return on-screen text")
     commands.add_parser("screenshot", help="request a screenshot and return its path")
     commands.add_parser("clipboard", help="request and return the iPhone clipboard")
     commands.add_parser("alarms", help="request and return enabled alarms")
@@ -272,8 +255,6 @@ def main(argv: list[str] | None = None) -> int:
             send_command(" ".join(args.words))
         elif args.command == "sender":
             run_sender()
-        elif args.command == "read-screen":
-            read_screen()
         elif args.command == "screenshot":
             capture_screen()
         elif args.command == "clipboard":
