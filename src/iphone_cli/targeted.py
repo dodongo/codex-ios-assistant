@@ -16,14 +16,15 @@ CAPABILITIES = {
 
 
 class TargetedRequest:
-    """Resolve one live control, dispatch at most once, and verify its desired state."""
+    """Resolve one live control, dispatch at most once, and optionally verify state."""
 
     def __init__(self, args, path, body):
         try:
-            if not isinstance(args.target, str) or len(args.target) > 16384 or not isinstance(args.ensure, str) or len(args.ensure) > 16384:
+            if (not isinstance(args.target, str) or len(args.target) > 16384
+                    or args.ensure is not None and (not isinstance(args.ensure, str) or len(args.ensure) > 16384)):
                 raise ValueError("target and ensure must be bounded JSON objects")
             self.target = json.loads(args.target)
-            self.ensure = json.loads(args.ensure)
+            self.ensure = json.loads(args.ensure) if args.ensure is not None else None
             if not isinstance(self.target, dict) or set(self.target) - {"bundleId", "using", "value", "point"}:
                 raise ValueError("invalid target fields")
             ui._bundle(self.target.get("bundleId"))
@@ -31,13 +32,13 @@ class TargetedRequest:
                 raise ValueError("target requires a native element selector")
             if not isinstance(self.target.get("value"), str) or not 0 < len(self.target["value"]) <= 8192:
                 raise ValueError("target requires a selector value")
-            if (not isinstance(self.ensure, dict) or not {"attribute", "equals"} <= set(self.ensure)
+            if args.ensure is not None and (not isinstance(self.ensure, dict) or not {"attribute", "equals"} <= set(self.ensure)
                     or set(self.ensure) - {"attribute", "equals", "target"}
                     or self.ensure["attribute"] not in {"value", "name", "label", "enabled", "visible", "selected"}
                     or not isinstance(self.ensure["equals"], (str, bool, int, float, type(None)))
                     or isinstance(self.ensure["equals"], float) and not math.isfinite(self.ensure["equals"])):
                 raise ValueError("ensure requires an attribute and scalar equals value")
-            self.verification_target = self.ensure.get("target", self.target)
+            self.verification_target = self.ensure.get("target", self.target) if self.ensure else self.target
             if self.verification_target is not self.target:
                 if (not isinstance(self.verification_target, dict) or set(self.verification_target) != {"using", "value"}
                         or self.verification_target["using"] not in {"predicate string", "accessibility id", "class chain"}
@@ -48,8 +49,8 @@ class TargetedRequest:
                 "/wda/tap", "/actions", "/element/{id}/click", "/element/{id}/value", "/element/{id}/clear",
             }:
                 raise ValueError("targeted requests support session POST tap, actions, click, value, or clear")
-            if getattr(args, "snapshot", None) or getattr(args, "observe", False):
-                raise ValueError("targeted requests use live element checks rather than snapshots or observation")
+            if getattr(args, "snapshot", None):
+                raise ValueError("targeted requests use live element checks rather than snapshots")
             point = self.target.get("point")
             if path in {"/wda/tap", "/actions"}:
                 if (not isinstance(point, dict) or set(point) != {"x", "y"}
@@ -112,12 +113,12 @@ class TargetedRequest:
         self.address, self.prefix = address, prefix
         self.until = time.monotonic() + min(timeout, max(0, state["deadline"] - time.time()))
         self._foreground(wait=True)
-        desired = self.ensure["equals"]
+        desired = self.ensure["equals"] if self.ensure else None
         while True:
             existing = self._find(self.verification_target, missing_ok=True)
             self._remaining()
-            before = self._value(existing[1]) if existing else None
-            if existing and type(before) is type(desired) and before == desired:
+            before = self._value(existing[1]) if existing and self.ensure else None
+            if self.ensure and existing and type(before) is type(desired) and before == desired:
                 return {"changed": False, "verified": True, "before": before, "after": before}
             found = existing if self.verification_target is self.target else self._find(self.target, missing_ok=True)
             if found:
@@ -151,6 +152,8 @@ class TargetedRequest:
             ui._http(address, path, body, timeout=self._remaining(), method="POST")
         except IPhoneError as error:
             raise IPhoneError(f"Targeted action outcome is unknown; action was not replayed. {error}") from error
+        if self.ensure is None:
+            return {"dispatched": True, "verified": False}
         try:
             while True:
                 found = self._find(self.verification_target, missing_ok=True)

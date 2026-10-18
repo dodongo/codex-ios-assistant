@@ -128,6 +128,40 @@ class UITests(unittest.TestCase):
         self.assertEqual(result.data["value"]["changed"], False)
         self.assertFalse(any(url.endswith(("/source", "/screenshot", "/wda/tap")) for url, _ in self.http_calls))
 
+    def test_targeted_observation_is_screenshot_only_and_not_a_mutation_snapshot(self):
+        self.element_results = [{"element-6066-11e4-a52e-4f735466cecf": "ABC-123", "enabled": True,
+                                 "displayed": True}]
+        result = self.request("POST", "/element/{id}/click", target=json.dumps({
+            "bundleId": "com.apple.Preferences", "using": "accessibility id", "value": "Known"}),
+            ensure=None, observe=True)
+        self.assertEqual(result.status, "requested")
+        self.assertEqual(result.data["value"], {"dispatched": True, "verified": False})
+        self.assertEqual(result.data["observation_scope"], "screenshot-only")
+        self.assertNotIn("snapshot", result.data)
+        picture = Path(result.data["screenshot"])
+        self.assertTrue(picture.read_bytes().startswith(b"\x89PNG"))
+        self.assertEqual(picture.stat().st_mode & 0o777, 0o600)
+        self.assertFalse(picture.with_suffix(".json").exists())
+        self.assertFalse(any(url.endswith("/source") for url, _ in self.http_calls))
+        self.assertEqual(sum(url.endswith("/click") for url, _ in self.http_calls), 1)
+
+    def test_targeted_screenshot_failure_does_not_replay_action(self):
+        self.element_results = [{"element-6066-11e4-a52e-4f735466cecf": "ABC-123", "enabled": True,
+                                 "displayed": True}]
+        original = self.open
+
+        def bad_screenshot(request, **kwargs):
+            if request.full_url.endswith("/screenshot"):
+                return io.BytesIO(json.dumps({"value": "not PNG"}).encode())
+            return original(request, **kwargs)
+
+        with patch("urllib.request.build_opener", return_value=SimpleNamespace(open=bad_screenshot)):
+            with self.assertRaisesRegex(IPhoneError, "dispatched, but its observation failed"):
+                self.request("POST", "/element/{id}/click", target=json.dumps({
+                    "bundleId": "com.apple.Preferences", "using": "accessibility id", "value": "Known"}),
+                    ensure=None, observe=True)
+        self.assertEqual(sum(url.endswith("/click") for url, _ in self.http_calls), 1)
+
     def test_start_reuses_an_unlocked_session_without_extending_it(self):
         before = ui._read(self.root / "state.json")
         result = self.call("start", duration=600, reuse=True)

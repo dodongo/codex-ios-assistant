@@ -71,6 +71,17 @@ class TargetedTests(unittest.TestCase):
         self.assertFalse(self.execute()["changed"])
         self.assertFalse(any(path.endswith("/wda/tap") for path, _ in self.calls))
 
+    def test_unensured_action_dispatches_once_without_inventing_verification(self):
+        self.value = "1"
+        self.assertEqual(self.execute(self.request(ensure=None, observe=True)), {"dispatched": True, "verified": False})
+        self.assertEqual(sum(path.endswith("/wda/tap") for path, _ in self.calls), 1)
+
+    def test_unensured_action_still_rejects_ambiguous_target(self):
+        self.controls *= 2
+        with self.assertRaisesRegex(IPhoneError, "exactly one"):
+            self.execute(self.request(ensure=None))
+        self.assertFalse(any(path.endswith("/wda/tap") for path, _ in self.calls))
+
     def test_waits_for_app_activation_before_looking_up_controls(self):
         original = self.http
         polls = [0]
@@ -166,7 +177,7 @@ class TargetedTests(unittest.TestCase):
 
     def test_invalid_options_fail_before_contacting_device(self):
         for options in ({"target": "[]"}, {"target": "{}"}, {"ensure": "null"}, {"ensure": '{"attribute":"value","equals":[]}'},
-                        {"scope": "device"}, {"method": "DELETE"}, {"snapshot": "UUID"}, {"observe": True},
+                        {"scope": "device"}, {"method": "DELETE"}, {"snapshot": "UUID"},
                         {"target": json.dumps({**TARGET, "point": {"x": 2, "y": 0}})}):
             with self.subTest(options=options), self.assertRaises(IPhoneError):
                 self.request(**options)

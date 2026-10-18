@@ -666,27 +666,30 @@ def handle_ui(args: argparse.Namespace) -> Result:
                             if foreground["bundleId"] == body["bundleId"]:
                                 break
                             time.sleep(min(0.1, remaining_timeout()))
-                    source = value if method == "GET" and request_path == "/source" else _http(address, prefix + "/source", timeout=remaining_timeout())
-                    while True:
-                        if not isinstance(source, str) or "<!DOCTYPE" in source or "<!ENTITY" in source:
-                            raise IPhoneError("Unsafe or invalid UI XML response.")
-                        try:
-                            tree = ET.fromstring(source)
-                        except ET.ParseError as error:
-                            raise IPhoneError("Malformed UI XML.") from error
+                    if targeted:
                         encoded = _http(address, "/screenshot", timeout=remaining_timeout())
-                        current_source = _http(address, prefix + "/source", timeout=remaining_timeout())
-                        remaining_timeout()
-                        if current_source == source:
-                            break
-                        source = current_source
-                    elements = []
-                    for element in tree.iter():
-                        if element.get("visible") != "true":
-                            continue
-                        if element.tag.endswith("SecureTextField"):
-                            element.attrib.pop("value", None)
-                        elements.append({"type": element.tag, **element.attrib})
+                    else:
+                        source = value if method == "GET" and request_path == "/source" else _http(address, prefix + "/source", timeout=remaining_timeout())
+                        while True:
+                            if not isinstance(source, str) or "<!DOCTYPE" in source or "<!ENTITY" in source:
+                                raise IPhoneError("Unsafe or invalid UI XML response.")
+                            try:
+                                tree = ET.fromstring(source)
+                            except ET.ParseError as error:
+                                raise IPhoneError("Malformed UI XML.") from error
+                            encoded = _http(address, "/screenshot", timeout=remaining_timeout())
+                            current_source = _http(address, prefix + "/source", timeout=remaining_timeout())
+                            remaining_timeout()
+                            if current_source == source:
+                                break
+                            source = current_source
+                        elements = []
+                        for element in tree.iter():
+                            if element.get("visible") != "true":
+                                continue
+                            if element.tag.endswith("SecureTextField"):
+                                element.attrib.pop("value", None)
+                            elements.append({"type": element.tag, **element.attrib})
                     try:
                         image = base64.b64decode(encoded, validate=True)
                     except (ValueError, TypeError) as error:
@@ -699,13 +702,17 @@ def handle_ui(args: argparse.Namespace) -> Result:
                     descriptor = os.open(picture, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                     with os.fdopen(descriptor, "wb") as stream:
                         stream.write(image)
-                    _write(picture.with_suffix(".json"), {
-                        "nonce": state["nonce"], "session": state["session"], "created": time.time(),
-                        "digest": hashlib.sha256(source.encode()).hexdigest(), "elements": elements,
-                    })
-                    controls = [element for element in elements if element.get("accessible") != "false"]
-                    data.update(snapshot=snapshot, screenshot=str(picture), elements=controls[:200],
-                                total=len(controls), truncated=len(controls) > 200)
+                    data["screenshot"] = str(picture)
+                    if targeted:
+                        data["observation_scope"] = "screenshot-only"
+                    else:
+                        _write(picture.with_suffix(".json"), {
+                            "nonce": state["nonce"], "session": state["session"], "created": time.time(),
+                            "digest": hashlib.sha256(source.encode()).hexdigest(), "elements": elements,
+                        })
+                        controls = [element for element in elements if element.get("accessible") != "false"]
+                        data.update(snapshot=snapshot, elements=controls[:200],
+                                    total=len(controls), truncated=len(controls) > 200)
                 except (IPhoneError, OSError) as error:
                     raise IPhoneError(f"Request was dispatched, but its observation failed: {error}") from error
             if destination is not None:
@@ -719,8 +726,9 @@ def handle_ui(args: argparse.Namespace) -> Result:
                 data["output"] = str(destination.resolve())
             else:
                 data["value"] = value
-            return Result("ui", action, "completed" if query or targeted else "requested",
-                          "Target state verified." if targeted else "WebDriverAgent response received." if query else "Request dispatched; observe to verify its effect.", data)
+            verified = targeted is not None and value.get("verified") is True
+            return Result("ui", action, "completed" if query or verified else "requested",
+                          "Target state verified." if verified else "WebDriverAgent response received." if query else "Request dispatched; observe to verify its effect.", data)
         raise IPhoneError("Unsupported UI action: " + action)
 
 
