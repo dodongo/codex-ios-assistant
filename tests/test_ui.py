@@ -1,4 +1,5 @@
 import argparse
+import base64
 import fcntl
 import hashlib
 import io
@@ -35,6 +36,7 @@ class UITests(unittest.TestCase):
         self.locked = False
         self.source = SOURCE
         self.http_calls = []
+        self.http_methods = []
         self.native_calls = []
         self.response = None
         self.element_results = [{"element-6066-11e4-a52e-4f735466cecf": "ABC-123"}]
@@ -72,12 +74,15 @@ class UITests(unittest.TestCase):
 
     def open(self, request, **kwargs):
         self.http_calls.append((request.full_url, request.data))
+        self.http_methods.append(request.get_method())
         if isinstance(self.response, Exception):
             raise self.response
         if self.response is not None:
             return io.BytesIO(self.response)
         if request.full_url.endswith("/source"):
             value = self.source
+        elif request.full_url.endswith("/screenshot"):
+            value = base64.b64encode(b"\x89PNG\r\n\x1a\nPNG test payload").decode()
         elif request.full_url.endswith("/wda/locked"):
             value = self.locked
         elif request.full_url.endswith("/elements"):
@@ -87,7 +92,7 @@ class UITests(unittest.TestCase):
         elif request.full_url.endswith("/status"):
             value = {"ready": True}
         elif request.full_url.endswith("/session"):
-            value = {"sessionId": "SESSION-ID"}
+            value = {"sessionId": "CREATED-SESSION"}
         elif request.full_url.endswith("/wda/shutdown"):
             return io.BytesIO(b"Shutting down")
         else:
@@ -96,6 +101,180 @@ class UITests(unittest.TestCase):
 
     def call(self, action, **values):
         return ui.handle_ui(argparse.Namespace(action=action, timeout=2, dry_run=False, **values))
+
+    def request(self, method="GET", path="/orientation", **values):
+        return self.call("request", method=method, path=path,
+                         scope=values.pop("scope", "session"), data=values.pop("data", None), **values)
+
+    def observe(self):
+        return self.request("GET", "/source", observe=True)
+
+    def test_request_prefers_direct_app_links_without_a_screen_target(self):
+        self.request("POST", "/url", data=json.dumps({
+            "url": "App-prefs:com.openai.chat", "bundleId": "com.apple.Preferences",
+        }))
+        self.assertTrue(self.http_calls[-1][0].endswith("/session/SESSION-ID/url"))
+        self.assertEqual(len(self.http_calls), 2)
+
+    def test_request_rejects_unsafe_app_links_before_contacting_device(self):
+        for url in ["file:///private", "javascript:alert(1)", "data:text/plain,test", "not a URL", "foo://[", "foo:test\n"]:
+            with self.subTest(url=url), self.assertRaises(IPhoneError):
+                self.request("POST", "/url", data=json.dumps({"url": url}))
+        self.assertEqual(self.http_calls, [])
+
+    def test_mutation_can_return_its_post_action_observation(self):
+        snapshot = self.observe().data["snapshot"]
+        result = self.request("POST", "/wda/keys", data='{"value":["ChatGPT"]}', snapshot=snapshot, observe=True)
+        self.assertEqual(result.status, "requested")
+        self.assertNotEqual(result.data["snapshot"], snapshot)
+        self.assertTrue(Path(result.data["screenshot"]).is_file())
+        self.assertEqual(self.http_calls[-2][0].rsplit("/", 1)[-1], "source")
+        self.assertTrue(self.http_calls[-1][0].endswith("/screenshot"))
+
+    def test_parser_exposes_one_device_command_interface(self):
+        from contextlib import redirect_stderr
+        args = build_parser().parse_args(["ui", "request", "POST", "/wda/keys", "--data", '{"value":["text"]}', "--observe", "--snapshot", self.nonce])
+        self.assertEqual(args.action, "request")
+        self.assertTrue(args.observe)
+        for action in ("open", "tap", "observe", "return"):
+            with self.subTest(action=action), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                build_parser().parse_args(["ui", action])
+
+    def test_observation_reuses_the_requested_xml_source(self):
+        self.observe()
+        self.assertEqual(sum(url.endswith("/source") for url, _ in self.http_calls), 1)
+        self.assertTrue(self.http_calls[-1][0].endswith("/screenshot"))
+
+    def test_observation_rejects_invalid_source_and_image_data(self):
+        for source in ("<!DOCTYPE x><App/>", "<broken>"):
+            self.source = source
+            with self.subTest(source=source), self.assertRaisesRegex(IPhoneError, "observation failed"):
+                self.observe()
+
+    def test_wda_request_reads_are_session_scoped_without_a_full_observation(self):
+        result = self.request(path="/source?format=json")
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.data["value"], None)
+        self.assertTrue(self.http_calls[-1][0].endswith("/session/SESSION-ID/source?format=json"))
+        self.assertEqual(len(self.http_calls), 2)
+
+    def test_wda_request_device_scope_uses_only_the_owned_controller(self):
+        result = self.request(path="/status", scope="device")
+        self.assertTrue(self.http_calls[-1][0].endswith(":8100/status"))
+        self.assertEqual(result.data["value"], {"ready": True})
+
+    def test_wda_request_element_queries_do_not_consume_a_snapshot(self):
+        result = self.request("POST", "/elements", data='{"using":"accessibility id","value":"Search"}')
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.data["value"], self.element_results)
+        self.assertEqual(len(self.http_calls), 2)
+
+    def test_wda_request_typing_consumes_one_fresh_observation(self):
+        snapshot = self.observe().data["snapshot"]
+        result = self.request("POST", "/wda/keys", data='{"value":["ChatGPT"]}', snapshot=snapshot)
+        self.assertEqual(result.status, "requested")
+        self.assertTrue(self.http_calls[-1][0].endswith("/session/SESSION-ID/wda/keys"))
+        self.assertEqual(json.loads(self.http_calls[-1][1]), {"value": ["ChatGPT"]})
+        self.assertFalse((self.root / "snapshots" / (snapshot + ".json")).exists())
+        with self.assertRaises(IPhoneError):
+            self.request("POST", "/wda/keys", data='{"value":["ChatGPT"]}', snapshot=snapshot)
+
+    def test_wda_request_mutations_require_an_observation_before_contacting_device(self):
+        for method, path in [("POST", "/wda/scroll"), ("PUT", "/custom"), ("DELETE", "/"), ("GET", "/wda/shutdown")]:
+            with self.subTest(method=method, path=path), self.assertRaisesRegex(IPhoneError, "--snapshot"):
+                self.request(method, path)
+        self.assertEqual(self.http_calls, [])
+        self.assertEqual(self.native_calls, [])
+
+    def test_wda_request_rejects_changed_screen_before_dispatch(self):
+        snapshot = self.observe().data["snapshot"]
+        self.source = '<App name="Changed"/>'
+        with self.assertRaisesRegex(IPhoneError, "Screen changed"):
+            self.request("POST", "/wda/scroll", data='{"direction":"down"}', snapshot=snapshot)
+        self.assertFalse(any(url.endswith("/wda/scroll") for url, _ in self.http_calls))
+
+    def test_wda_request_rejects_unsafe_paths_and_foreign_session_ids(self):
+        for path in ["https://example.com/status", "//example.com/status", "/../status", "/%2e%2e/status",
+                     "/%252e%252e/status", "/wda\\status", "/wda//status", "/status#fragment",
+                     "/session/OTHER-ID/source", "/%0astatus", "/status\r\nX:evil"]:
+            with self.subTest(path=path), self.assertRaises(IPhoneError):
+                self.request(path=path)
+        self.assertEqual(self.http_calls, [])
+
+    def test_wda_request_rejects_invalid_json_without_contacting_device(self):
+        for data in ["{", "[]", "null", '{"value":NaN}', '{"value":Infinity}']:
+            with self.subTest(data=data), self.assertRaises(IPhoneError):
+                self.request("POST", "/elements", data=data)
+        self.assertEqual(self.http_calls, [])
+
+    def test_wda_request_cannot_enable_automatic_permission_approval(self):
+        for data in [
+            '{"settings":{"defaultAlertAction":"accept"}}',
+            '{"settings":{"appium:defaultAlertAction":" ACCEPT "}}',
+            '{"capabilities":{"alwaysMatch":{"autoAcceptAlerts":true}}}',
+        ]:
+            with self.subTest(data=data), self.assertRaisesRegex(IPhoneError, "Automatic permission"):
+                self.request("POST", "/appium/settings", data=data, snapshot=str(uuid.uuid4()))
+        self.assertEqual(self.http_calls, [])
+
+    def test_wda_request_reports_unknown_mutation_outcome_without_replay(self):
+        snapshot = self.observe().data["snapshot"]
+        normal = self.open
+
+        def fail(request, **kwargs):
+            if request.full_url.endswith("/wda/keys"):
+                self.http_calls.append((request.full_url, request.data))
+                raise URLError("connection lost")
+            return normal(request, **kwargs)
+
+        with patch("urllib.request.build_opener", return_value=SimpleNamespace(open=fail)):
+            with self.assertRaisesRegex(IPhoneError, "outcome is unknown"):
+                self.request("POST", "/wda/keys", snapshot=snapshot)
+        self.assertEqual(sum(url.endswith("/wda/keys") for url, _ in self.http_calls), 1)
+        self.assertFalse((self.root / "snapshots" / (snapshot + ".json")).exists())
+
+    def test_wda_request_saves_response_as_a_new_private_json_file(self):
+        output = self.root / "response.json"
+        self.request(path="/status", scope="device", output=str(output))
+        self.assertEqual(json.loads(output.read_text()), {"ready": True})
+        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+        previous = len(self.http_calls)
+        with self.assertRaisesRegex(IPhoneError, "new file"):
+            self.request(path="/status", scope="device", output=str(output))
+        self.assertEqual(len(self.http_calls), previous)
+
+    def test_wda_request_session_deletion_requests_owned_runner_cleanup(self):
+        snapshot = self.observe().data["snapshot"]
+        self.request("DELETE", "/", snapshot=snapshot)
+        self.assertTrue((self.root / (self.nonce + ".stop")).exists())
+        self.assertLessEqual(ui._read(self.root / "state.json")["deadline"], time.time())
+        self.assertEqual(self.http_methods[-1], "DELETE")
+
+    def test_wda_request_session_creation_updates_owned_session_identity(self):
+        snapshot = self.observe().data["snapshot"]
+        self.request("POST", "/session", scope="device", snapshot=snapshot,
+                     data='{"capabilities":{"alwaysMatch":{}}}')
+        self.assertEqual(ui._read(self.root / "state.json")["session"], "CREATED-SESSION")
+
+    def test_session_creation_observes_the_new_session(self):
+        snapshot = self.observe().data["snapshot"]
+        self.request("POST", "/session", scope="device", snapshot=snapshot, observe=True,
+                     data='{"capabilities":{"alwaysMatch":{}}}')
+        self.assertTrue(self.http_calls[-2][0].endswith("/session/CREATED-SESSION/source"))
+
+    def test_session_ending_request_rejects_post_action_observation(self):
+        with self.assertRaisesRegex(IPhoneError, "session-ending"):
+            self.request("DELETE", "/", snapshot=self.nonce, observe=True)
+        self.assertEqual(self.http_calls, [])
+
+    def test_wda_request_dry_run_and_parser_support_the_full_transport(self):
+        args = build_parser().parse_args(["ui", "request", "DELETE", "/wda/simulatedLocation",
+                                         "--scope", "device", "--snapshot", self.nonce, "--dry-run"])
+        result = ui.handle_ui(args)
+        self.assertEqual(result.status, "dry-run")
+        self.assertEqual(result.data["method"], "DELETE")
+        self.assertEqual(result.data["scope"], "device")
+        self.assertEqual(self.http_calls, [])
 
     def test_handle_ui_dry_run_does_not_touch_device(self):
         result = ui.handle_ui(argparse.Namespace(action="start", dry_run=True, timeout=30))
@@ -108,102 +287,55 @@ class UITests(unittest.TestCase):
             with self.subTest(timeout=timeout), self.assertRaises(IPhoneError):
                 ui.handle_ui(argparse.Namespace(action="status", timeout=timeout))
 
-    def test_handle_ui_observe_and_tap_use_fresh_private_snapshot(self):
-        result = self.call("observe")
-        snapshot = result.data["snapshot"]
-        self.assertEqual(result.data["elements"][0]["name"], "Select")
-        self.assertEqual(Path(result.data["screenshot"]).stat().st_mode & 0o777, 0o600)
-        self.assertEqual(self.root.stat().st_mode & 0o777, 0o700)
-        result = self.call("tap", name="Select", snapshot=snapshot)
-        self.assertEqual(result.status, "requested")
-        self.assertTrue(self.http_calls[-1][0].endswith("/element/ABC-123/click"))
-        self.assertFalse((self.root / "snapshots" / (snapshot + ".json")).exists())
 
-    def test_handle_ui_rejects_replayed_snapshot(self):
-        snapshot = self.call("observe").data["snapshot"]
-        self.call("tap", name="Select", snapshot=snapshot)
-        with self.assertRaises(IPhoneError):
-            self.call("tap", name="Select", snapshot=snapshot)
 
     def test_handle_ui_rejects_locked_device_before_action(self):
         self.locked = True
         with self.assertRaisesRegex(IPhoneError, "Unlock"):
-            self.call("open", bundle="com.apple.shortcuts")
+            self.request("POST", "/wda/apps/activate", data='{"bundleId":"com.apple.shortcuts"}')
         self.assertEqual(len(self.http_calls), 1)
         self.assertTrue(self.http_calls[0][0].endswith("/wda/locked"))
 
     def test_handle_ui_rejects_unknown_controller_lock_state(self):
         self.response = json.dumps({"value": None}).encode()
         with self.assertRaisesRegex(IPhoneError, "Cannot verify"):
-            self.call("observe")
+            self.observe()
 
     def test_handle_ui_rejects_changed_tunnel(self):
         self.address = "fd12:3456::2"
         with self.assertRaisesRegex(IPhoneError, "tunnel changed"):
-            self.call("observe")
+            self.observe()
 
     def test_handle_ui_rejects_lan_or_public_endpoint(self):
         for address in ["192.168.1.1", "2001:4860::1", "::1", None]:
             self.address = address
             with self.subTest(address=address), self.assertRaises(IPhoneError):
-                self.call("observe")
+                self.observe()
 
     def test_handle_ui_rejects_stale_changed_and_malformed_snapshots(self):
         for change in [{"created": time.time() - 31}, {"created": float("nan")},
-                       {"nonce": "other"}, {"digest": "wrong"}, {"elements": None}]:
-            result = self.call("observe")
+                       {"nonce": "other"}, {"session": "other"}, {"digest": "wrong"}, {"elements": None}]:
+            result = self.observe()
             snapshot = result.data["snapshot"]
             path = self.root / "snapshots" / (snapshot + ".json")
             record = json.loads(path.read_text())
             record.update(change)
             path.write_text(json.dumps(record))
             with self.subTest(change=change), self.assertRaises(IPhoneError):
-                self.call("tap", name="Select", snapshot=snapshot)
+                self.request("POST", "/wda/keys", snapshot=snapshot)
 
     def test_handle_ui_rejects_path_traversal_snapshot(self):
         with self.assertRaises(IPhoneError):
-            self.call("tap", name="Select", snapshot="../../config")
+            self.request("POST", "/wda/keys", snapshot="../../config")
 
-    def test_handle_ui_rejects_ambiguous_or_unobserved_controls(self):
-        snapshot = self.call("observe").data["snapshot"]
-        with self.assertRaises(IPhoneError):
-            self.call("tap", name="Send", snapshot=snapshot)
-        self.element_results *= 2
-        with self.assertRaisesRegex(IPhoneError, "ambiguous"):
-            self.call("tap", name="Select", snapshot=snapshot)
 
-    def test_handle_ui_rejects_invalid_element_id(self):
-        snapshot = self.call("observe").data["snapshot"]
-        self.element_results = [{"element-6066-11e4-a52e-4f735466cecf": "../../send"}]
-        with self.assertRaisesRegex(IPhoneError, "element identifier"):
-            self.call("tap", name="Select", snapshot=snapshot)
 
-    def test_handle_ui_tap_disambiguates_repeated_names_by_observed_label(self):
-        self.source = '<App><XCUIElementTypeButton name="enum" label="Value" visible="true" enabled="true"/>' \
-                      '<XCUIElementTypeButton name="enum" label="Condition" visible="true" enabled="true"/></App>'
-        snapshot = self.call("observe").data["snapshot"]
-        with self.assertRaises(IPhoneError):
-            self.call("tap", name="enum", snapshot=snapshot)
-        self.call("tap", name="enum", label="Value", snapshot=snapshot)
-        query = json.loads(self.http_calls[-2][1])
-        self.assertEqual(query, {"using": "predicate string", "value": 'name == "enum" AND type == "XCUIElementTypeButton" AND visible == true AND enabled == true AND label == "Value"'})
 
-    def test_handle_ui_invalidates_snapshot_when_tap_outcome_is_unknown(self):
-        snapshot = self.call("observe").data["snapshot"]
-        normal = self.open
-        def failure(request, **kwargs):
-            if request.full_url.endswith("/click"):
-                raise URLError("connection lost")
-            return normal(request, **kwargs)
-        with patch("urllib.request.build_opener", return_value=SimpleNamespace(open=failure)):
-            with self.assertRaisesRegex(IPhoneError, "outcome is unknown"):
-                self.call("tap", name="Select", snapshot=snapshot)
-        self.assertFalse((self.root / "snapshots" / (snapshot + ".json")).exists())
 
     def test_handle_ui_redacts_secure_values_and_limits_output(self):
         self.source = '<App><XCUIElementTypeSecureTextField name="Password" value="private" visible="true"/>' + ''.join(
             f'<Text name="item-{n}" visible="true"/>' for n in range(201)) + '</App>'
-        result = self.call("observe")
+        result = self.observe()
         self.assertNotIn("value", result.data["elements"][0])
         self.assertEqual(len(result.data["elements"]), 200)
         self.assertTrue(result.data["truncated"])
@@ -214,46 +346,21 @@ class UITests(unittest.TestCase):
                          json.dumps({"value": {"error": "bad", "message": "failure"}}).encode()]:
             self.response = response
             with self.subTest(length=len(response)), self.assertRaises(IPhoneError):
-                self.call("observe")
+                self.observe()
 
     def test_handle_ui_surfaces_http_and_connection_failures(self):
         for error in [URLError("unreachable"), HTTPError("url", 404, "missing", {}, io.BytesIO(b"no such element"))]:
             self.response = error
             with self.subTest(error=error), self.assertRaises(IPhoneError):
-                self.call("observe")
+                self.observe()
 
-    def test_handle_ui_open_and_return_verify_foreground(self):
-        result = self.call("open", bundle="com.apple.shortcuts")
-        self.assertEqual(result.status, "completed")
-        self.assertEqual(json.loads(self.http_calls[-1][1])["bundleId"], "com.apple.shortcuts")
-        self.assertTrue(self.http_calls[-2][0].endswith("/wda/apps/activate"))
-        self.call("return")
-        self.assertEqual(json.loads(self.http_calls[-1][1])["bundleId"], "com.openai.chat")
-        normal = self.open
-        def background(request, **kwargs):
-            if request.full_url.endswith("/wda/apps/state"):
-                return io.BytesIO(json.dumps({"value": 2}).encode())
-            return normal(request, **kwargs)
-        with patch("urllib.request.build_opener", return_value=SimpleNamespace(open=background)):
-            with self.assertRaisesRegex(IPhoneError, "foreground"):
-                self.call("open", bundle="com.apple.shortcuts")
 
     def test_handle_ui_status_and_expired_session(self):
         self.write("state.json", {"status": "running", "deadline": time.time() - 1})
         self.assertEqual(self.call("status").data["session"]["status"], "expired")
         with self.assertRaisesRegex(IPhoneError, "expired"):
-            self.call("observe")
+            self.observe()
 
-    def test_handle_ui_opens_app_url_without_shortcut_bridge(self):
-        url = "shortcuts://open-shortcut?name=Example%20Shortcut"
-        self.call("open", bundle="com.apple.shortcuts", url=url)
-        self.assertTrue(self.http_calls[-2][0].endswith("/url"))
-        self.assertEqual(json.loads(self.http_calls[-2][1]), {"bundleId": "com.apple.shortcuts", "url": url})
-        for url in ["file:///private", "javascript:alert(1)", "data:text/plain,test", "not a URL", "foo://[", "foo:test\n"]:
-            before = len(self.http_calls)
-            with self.subTest(url=url), self.assertRaises(IPhoneError):
-                self.call("open", bundle="com.apple.shortcuts", url=url)
-            self.assertEqual(len(self.http_calls), before + 1)
 
     def test_handle_ui_start_rejects_duplicate_and_invalid_duration(self):
         with self.assertRaisesRegex(IPhoneError, "already exists"):
@@ -269,7 +376,7 @@ class UITests(unittest.TestCase):
                 self.call("status")
         self.write("state.json", {"status": "running", "deadline": time.time() + 10})
         with self.assertRaisesRegex(IPhoneError, "supervisor identity"):
-            self.call("observe")
+            self.observe()
 
     def test_handle_ui_stop_requests_supervisor_cleanup(self):
         def stopped(_):
@@ -338,7 +445,7 @@ class UITests(unittest.TestCase):
         self.assertNotIn("bundleId", capabilities)
 
     def test_handle_ui_native_timeouts_are_integer_seconds(self):
-        ui.handle_ui(argparse.Namespace(action="observe", timeout=2.5, dry_run=False))
+        ui.handle_ui(argparse.Namespace(action="request", method="GET", path="/source", scope="session", data=None, observe=True, timeout=2.5, dry_run=False))
         for command in self.native_calls:
             self.assertEqual(command[command.index("--timeout") + 1], "3")
 
@@ -346,11 +453,5 @@ class UITests(unittest.TestCase):
         with (self.root / "device.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             with self.assertRaisesRegex(IPhoneError, "Device service is busy"):
-                ui.handle_ui(argparse.Namespace(action="observe", timeout=0.01, dry_run=False))
+                ui.handle_ui(argparse.Namespace(action="request", method="GET", path="/source", scope="session", data=None, observe=True, timeout=0.01, dry_run=False))
         self.assertEqual(self.native_calls, [])
-
-    def test_build_parser_exposes_explicit_ui_commands(self):
-        for command in [["ui", "start"], ["ui", "open", "com.apple.shortcuts"],
-                        ["ui", "tap", "Select", "--snapshot", str(uuid.uuid4())], ["ui", "return"]]:
-            args = build_parser().parse_args(command)
-            self.assertIs(args.handler, ui.handle_ui)

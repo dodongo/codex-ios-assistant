@@ -16,7 +16,7 @@ def run_cli(*arguments: str, env: dict[str, str] | None = None) -> subprocess.Co
     if env:
         environment.update(env)
     return subprocess.run(
-        [str(IPHONE), *arguments],
+        [os.sys.executable, str(IPHONE), *arguments],
         cwd=ROOT,
         capture_output=True,
         text=True,

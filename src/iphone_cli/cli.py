@@ -171,6 +171,12 @@ def _handle_url(args: argparse.Namespace) -> Operation:
     return _open_operation("url", url, "URL opened.")
 
 
+def _handle_ui_request(args: argparse.Namespace) -> Result:
+    if args.data is not None:
+        args.data = _read_value(args.data, label="WebDriverAgent JSON body")
+    return handle_ui(args)
+
+
 def _handle_camera(args: argparse.Namespace) -> Operation:
     url = camera_url(args.mode, args.facing)
     details = [value for value in (args.mode, args.facing) if value]
@@ -1038,20 +1044,19 @@ def build_parser() -> argparse.ArgumentParser:
     configure.set_defaults(handler=handle_ui)
     start = _action_parser(ui, global_parent, "start", help="start a finite UI session; default 120 seconds")
     start.add_argument("--duration", type=_positive_int, default=120, help="session lifetime, 10–600 seconds")
+    start.add_argument("--tailnet-address", help="iPhone Tailscale IP; start on Wi-Fi, then keep this session on cellular (requires tailnet extra)")
     start.set_defaults(handler=handle_ui)
-    for action, description in [("status", "inspect session state"), ("stop", "stop the test runner"),
-                                ("observe", "capture controls and a private screenshot"),
-                                ("return", "return to the configured app")]:
+    for action, description in [("status", "inspect session state"), ("stop", "stop the test runner")]:
         _action_parser(ui, global_parent, action, help=description).set_defaults(handler=handle_ui)
-    ui_open = _action_parser(ui, global_parent, "open", help="bring an installed app to the foreground")
-    ui_open.add_argument("bundle", help="installed app bundle identifier")
-    ui_open.add_argument("--url", help="open a URL in this app without using the Shortcut bridge")
-    ui_open.set_defaults(handler=handle_ui)
-    tap = _action_parser(ui, global_parent, "tap", help="tap one uniquely named control from a fresh observation")
-    tap.add_argument("name", help="exact observed accessibility name, not a guessed label")
-    tap.add_argument("--label", help="exact observed label to disambiguate a repeated accessibility name")
-    tap.add_argument("--snapshot", required=True, help="observation UUID, valid for 30 seconds")
-    tap.set_defaults(handler=handle_ui)
+    request = _action_parser(ui, global_parent, "request", help="call any WebDriverAgent endpoint in the owned UI session")
+    request.add_argument("method", choices=("GET", "POST", "PUT", "DELETE"), help="HTTP method")
+    request.add_argument("path", help="endpoint path relative to the selected scope, including optional query parameters")
+    request.add_argument("--scope", choices=("session", "device"), default="session", help="session-relative or device-level endpoint (default: session)")
+    request.add_argument("--data", help="JSON object, or - to read JSON from stdin")
+    request.add_argument("--snapshot", help="fresh observation UUID; required for UI changes")
+    request.add_argument("--output", help="save the returned JSON value to a new private file")
+    request.add_argument("--observe", action="store_true", help="include a fresh screenshot, accessibility controls, and single-use observation UUID after the request")
+    request.set_defaults(handler=_handle_ui_request)
 
     doctor = _subparser(resources, "doctor", global_parent, help="check local dependencies")
     doctor.set_defaults(handler=_handle_doctor)

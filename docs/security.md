@@ -7,6 +7,7 @@ This project connects Codex, Messages, an iPhone Shortcut, and a private Tailsca
 - `~/.config/codex-ios-assistant/config.env` contains the iMessage target and receiver token.
 - `build/ios-assistant-actions.plist` contains the receiver hostname and token.
 - `~/.local/share/codex-ios-assistant/inbox/` contains screenshots.
+- `~/.pymobiledevice3/remote_*.plist` contains private RemotePairing keys for optional Tailscale UI sessions.
 
 The installer keeps these files outside Git or under ignored paths. Config files and screenshots use mode `0600`; their parent directories use `0700`.
 
@@ -25,6 +26,10 @@ The sender listens on a mode-`0600` Unix socket. It checks the peer UID when mac
 Restrict the iPhone Message automation to the expected sender and messages containing `hola`. Do not add a Shortcut branch that turns message text into arbitrary commands or runs an arbitrary Shortcut.
 
 The CLI opens message drafts for review. It does not send them. Commerce and rideshare links open a page without placing an order or requesting a ride.
+
+## UI sessions
+
+Optional Tailscale UI sessions authenticate with the configured phone's RemotePairing record and verify its device identifier. The userspace developer tunnel requires no root access. Its local controller relay uses a mode-`0600` Unix socket inside the private UI directory, rather than a TCP listener. Sessions last at most 600 seconds and stop on lock or connection failure. Each action checks the lock state again and uses fresh, single-use observations for taps. Wi-Fi-to-cellular handoff checks may wait up to 30 seconds; they do not replay actions.
 
 ## Check a commit
 

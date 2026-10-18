@@ -20,6 +20,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+tailnet = ["pymobiledevice3==11.35.0"]
+
 [project.urls]
 Homepage = "https://github.com/dodongo/codex-ios-assistant"
 Repository = "https://github.com/dodongo/codex-ios-assistant"

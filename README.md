@@ -17,8 +17,26 @@ Codex iOS Assistant lets Codex on a Mac control an iPhone. The `iphone` CLI send
 - Open Camera, Weather, Calendar, Calculator, Messages, Find My, Spotify, Photos, Wallet, Notes, Books, App Store, Uber, and DoorDash.
 - Open the Home Screen or Control Center; control timers, the flashlight, and Low Power Mode; place calls.
 - Search Mac Contacts and read the Mac's Messages database.
+- Inspect accessibility controls and tap them in finite paired UI sessions, including Tailscale sessions that continue from Wi-Fi onto cellular.
 
 Message composition opens a draft for review. The CLI does not send ordinary messages, buy anything, install apps, order food, or request rides.
+
+### Tailscale UI sessions
+
+With Python 3.13+, install the optional transport using `.venv/bin/python -m pip install -e '.[tailnet]'`. Configure a trusted signed UI runner with `iphone ui configure`. While the unlocked phone is connected over trusted USB, create its RemotePairing record with `.venv/bin/pymobiledevice3 lockdown remotepairing --pair --udid '<paired UDID>'`, then restrict `~/.pymobiledevice3/` to mode `0700` and its pairing records to `0600`.
+
+Start while the phone is on Wi-Fi and the native pairing is reachable:
+
+```bash
+iphone ui start --tailnet-address '<iPhone Tailscale IP>' --duration 600 --timeout 60
+```
+
+After startup succeeds, the phone can switch to cellular while that session remains active. All device interactions use `iphone ui request METHOD PATH --data '<JSON object>'`. Paths are session-relative; use `--scope device` for device-level endpoints. Add `--observe` for a post-request screenshot, accessibility controls, and snapshot ID. UI-dependent changes require that fresh, single-use `--snapshot`; explicit app activation and deep-link navigation do not. Prefer verified deep links over searching menus. Sessions stop on lock, expiry, or connection failure. Starting again requires Wi-Fi; this does not support cold starts on cellular.
+
+```bash
+iphone ui request POST /url --data '{"url":"App-prefs:com.openai.chat","bundleId":"com.apple.Preferences"}' --observe --json
+iphone ui request POST /wda/keys --data '{"value":["ChatGPT"]}' --snapshot '<observation UUID>' --observe --json
+```
 
 ## How it works
 
